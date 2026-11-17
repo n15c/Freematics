@@ -72,7 +72,17 @@ Nach einem OTA-Update vergleicht das Web UI die Build-Nummer vor und nach dem Ne
 5. Unter **Netzwerk** Heim-WLAN, APN und SIM-PIN eintragen. Das Passwort des Access-Points und des Web UI sollte man ändern.
 6. Speichern. Das Gerät startet neu.
 
-Nach dem Einstecken bleibt das Gerät mindestens 10 Minuten wach, und solange ein Gerät mit dem Access-Point verbunden ist, geht es nie in den Standby. Ist das Heim-WLAN nicht erreichbar, sucht das Gerät nur 15 s danach und versucht es danach alle 2 Minuten erneut, aber nur, wenn niemand mit dem Access-Point verbunden ist. Die Suche würde sonst den Access-Point stören. Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurieren die Zündung einschalten oder das Fahrzeug bewegen.
+Wann das Gerät in den Standby geht, steuern diese Regeln:
+
+- Es geht frühestens nach der *Standby-Wartezeit* (Standard 120 s) nach Zündung aus und ohne Bewegung in den Standby.
+- Nach dem **Einstecken** bleibt es 5 Minuten wach, zum Konfigurieren im parkierten Auto. Ein Neustart aus der Software (OTA, Speichern) zählt nicht.
+- Solange das **Web UI offen** ist (Anfrage in den letzten 3 Minuten) oder ein Firmware-Update läuft, gibt es keinen Standby.
+- Ist das Heim-WLAN nicht erreichbar, sucht das Gerät nur 15 s danach. Danach versucht es alle 2 Minuten erneut, aber nur, wenn niemand mit dem Access-Point verbunden ist.
+- Bei Zündung aus fragt das Gerät nur noch alle 5 s die Drehzahl ab, damit der Fahrzeugbus einschlafen kann.
+
+Warum das Gerät gerade wach bleibt, steht im Web UI unter *Status → Fahrzeug → „Kein Standby weil“* und alle 30 s in der seriellen Konsole (`[PWR] no standby: …`).
+
+Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurieren die Zündung einschalten oder das Fahrzeug bewegen.
 
 ### Traccar
 

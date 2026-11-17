@@ -145,7 +145,7 @@ void Vehicle::update(bool ignition)
   if (!m_obd.link || (!cfg.obdEnabled && !(cfg.canEnabled && cfg.canCount))) return;
   uint32_t now = millis();
   if (!m_ready) {
-    uint32_t retry = ignition ? OBD_RETRY_MS : 15000;
+    uint32_t retry = ignition ? OBD_RETRY_MS : 30000;
     if (m_lastTry && now - m_lastTry < retry) return;
     m_lastTry = now;
     // the protocol auto search takes seconds: only with ignition on
@@ -159,6 +159,12 @@ void Vehicle::update(bool ignition)
     m_lastTry = now;
   }
 
+  if (m_obdMode && !ignition) {
+    // ignition off: only check whether the engine runs (smart alternators keep
+    // the voltage low) and otherwise leave the bus alone so the car can sleep
+    pollRpm();
+    return;
+  }
   if (m_obdMode) {
     pollPids();
     if (!m_ready) return;
@@ -193,20 +199,41 @@ void Vehicle::pollPids()
       m_pidVal[i] = value * pidScale(p.pid);
       m_pidTs[i] = millis();
       liveSetValue(p.key, m_pidVal[i]);
+      if (p.pid == 0x0C) { m_rpm = value; m_rpmTs = m_pidTs[i]; }
     }
-    if (m_obd.errors >= 5) {
-      Serial.println("[OBD] ECU not responding");
-      m_obd.errors = 0;
-      m_ready = false;
-      m_obdMode = false;
-      m_lastTry = millis();
-      liveLock();
-      live.obdConnected = false;
-      liveUnlock();
-      return;
-    }
+    if (checkObdErrors()) return;
   }
   if (cfg.pidCount) m_pidCursor = (m_pidCursor + 1) % cfg.pidCount;
+}
+
+bool Vehicle::checkObdErrors()
+{
+  if (m_obd.errors < 5) return false;
+  Serial.println("[OBD] ECU not responding");
+  m_obd.errors = 0;
+  m_ready = false;
+  m_obdMode = false;
+  m_rpm = 0;
+  m_lastTry = millis();
+  liveLock();
+  live.obdConnected = false;
+  liveUnlock();
+  return true;
+}
+
+void Vehicle::pollRpm()
+{
+  uint32_t now = millis();
+  if (m_rpmRead && now - m_rpmRead < 5000) return;
+  m_rpmRead = now;
+  int value;
+  if (m_obd.readPID(0x0C, value)) {
+    m_rpm = value;
+    m_rpmTs = millis();
+  } else {
+    m_obd.errors += 2; // give up quickly when the ECUs went to sleep
+  }
+  checkObdErrors();
 }
 
 void Vehicle::restoreHeader()

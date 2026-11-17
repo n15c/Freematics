@@ -27,8 +27,17 @@ bool webBusy()
   return s_restartAt != 0;
 }
 
+static volatile uint32_t s_lastRequest = 0;
+
+bool webRecentlyUsed(uint32_t ms)
+{
+  uint32_t t = s_lastRequest;
+  return t && millis() - t < ms;
+}
+
 static bool auth()
 {
+  s_lastRequest = millis() | 1;
   if (!cfg.webPass[0]) return true;
   if (server.authenticate("admin", cfg.webPass)) return true;
   server.requestAuthentication(BASIC_AUTH, "Freematics");
@@ -72,6 +81,7 @@ static void handleStatus()
   static const char* states[] = {"boot", "driving", "idle", "standby"};
   doc["state"] = states[l.powerState < 4 ? l.powerState : 0];
   doc["ignition"] = l.ignition;
+  doc["standbyBlocker"] = l.standbyBlocker;
   doc["motion"] = l.motion;
   doc["voltage"] = serialized(String(l.voltage, 2));
   doc["devType"] = l.devType;

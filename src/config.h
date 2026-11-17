@@ -41,7 +41,8 @@
 #define HTTP_TIMEOUT_MS 15000
 #define WIFI_CONNECT_TIMEOUT_MS 8000
 #define STANDBY_POLL_MS 200
-#define CONFIG_WINDOW_MS 600000UL     // stay awake (AP on) for 10 min after power-up
+#define CONFIG_WINDOW_MS 300000UL     // stay awake (AP on) for 5 min after plugging in
+#define WEB_ACTIVE_MS 180000UL        // web UI counts as in use for 3 min after the last request
 
 // ---------------------------------------------------------------------------
 // Hardware

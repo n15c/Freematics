@@ -40,7 +40,8 @@ static uint16_t lastRecordCourse = 0;
 static uint32_t lastVoltageCheck = 0;
 static float voltage = 0;
 static int deviceTemp = 0;
-static bool gnssHw = false;   // standalone receiver found at boot
+static bool gnssHw = false;      // standalone receiver found at boot
+static bool powerOnBoot = false; // plugged in (not a software restart)
 
 static bool clockValid() { return time(nullptr) > 1700000000; }
 
@@ -200,7 +201,10 @@ static void checkVoltage()
 static bool ignitionCondition()
 {
   if (voltage >= cfg.runVoltage) return true;
-  if (vehicle.obdConnected()) return true;
+  // engine running although the voltage is low (smart alternator)
+  if (vehicle.engineRunning()) return true;
+  // no voltage measurement available at all: fall back to "ECU answers"
+  if (voltage <= 0 && vehicle.obdConnected()) return true;
   return false;
 }
 
@@ -213,7 +217,7 @@ static void updateIgnition()
     if (!ignition) {
       if (!ignitionCandidateSince) ignitionCandidateSince = now;
       // short debounce against voltage spikes
-      if (now - ignitionCandidateSince >= 1500 || vehicle.obdConnected()) {
+      if (now - ignitionCandidateSince >= 1500 || vehicle.engineRunning()) {
         ignition = true;
         ignitionCandidateSince = 0;
         state = PS_DRIVING;
@@ -241,6 +245,27 @@ static void updateIgnition()
 // ---------------------------------------------------------------------------
 // standby
 // ---------------------------------------------------------------------------
+// reason why the device stays awake, nullptr = standby now
+static const char* standbyBlocker(uint32_t now, bool moving)
+{
+  static char buf[64];
+  if (ignition) return "ignition on";
+  if (moving) return "vehicle moving (GNSS)";
+  if (now - lastMotion < 30000) return "motion detected (MEMS)";
+  if (webBusy()) return "firmware update";
+  if (webRecentlyUsed(WEB_ACTIVE_MS)) return "web UI in use";
+  if (powerOnBoot && now - live.bootMs < CONFIG_WINDOW_MS) {
+    snprintf(buf, sizeof(buf), "configuration window after power-up (%lus left)",
+             (unsigned long)(CONFIG_WINDOW_MS - (now - live.bootMs)) / 1000);
+    return buf;
+  }
+  uint32_t idle = now - idleSince;
+  if (idle < cfg.standbyDelay * 1000UL) {
+    snprintf(buf, sizeof(buf), "standby delay (%lus left)", (unsigned long)(cfg.standbyDelay * 1000UL - idle) / 1000);
+    return buf;
+  }
+  return nullptr;
+}
 static void standby()
 {
   Serial.println("[PWR] entering standby");
@@ -317,6 +342,7 @@ void setup()
   const esp_partition_t* part = esp_ota_get_running_partition();
   Serial.printf("\nFreematics Telelogger %s\n", fwVersionString());
   Serial.printf("[SYS] running from %s, reset reason %d\n", part ? part->label : "?", (int)esp_reset_reason());
+  powerOnBoot = esp_reset_reason() == ESP_RST_POWERON || esp_reset_reason() == ESP_RST_BROWNOUT;
 
 #ifdef PIN_LED
   pinMode(PIN_LED, OUTPUT);
@@ -409,8 +435,16 @@ void loop()
   // standby when parked long enough and nothing moves
   // never while somebody uses the web UI or a firmware update runs, and not within the first minutes after
   // power-up so the device can be configured in a parked car
-  bool configWindow = now - live.bootMs < CONFIG_WINDOW_MS || uplinkApClients() > 0 || webBusy();
-  if (!ignition && !moving && !configWindow && now - idleSince >= cfg.standbyDelay * 1000UL && now - lastMotion >= 30000) {
+  const char* blocker = standbyBlocker(now, moving);
+  static uint32_t lastBlockerLog = 0;
+  if (blocker && !ignition && now - lastBlockerLog >= 30000) {
+    lastBlockerLog = now;
+    Serial.printf("[PWR] no standby: %s\n", blocker);
+  }
+  liveLock();
+  strlcpy(live.standbyBlocker, blocker ? blocker : "", sizeof(live.standbyBlocker));
+  liveUnlock();
+  if (!blocker) {
     standby();
     return;
   }

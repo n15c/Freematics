@@ -66,6 +66,7 @@ struct LiveData {
   uint32_t failed;
 
   uint32_t bootMs;
+  char standbyBlocker[64];   // why the device does not go to standby
 };
 
 extern LiveData live;
