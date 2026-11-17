@@ -306,6 +306,8 @@ static void standby()
 // ---------------------------------------------------------------------------
 void setup()
 {
+  // give the co-processor time to boot when everything powers up together
+  delay(500);
   Serial.begin(115200);
   liveMutex = xSemaphoreCreateMutex();
   memset(&live, 0, sizeof(live));
@@ -321,10 +323,23 @@ void setup()
   Serial.printf("[CFG] %s\n", loaded ? "loaded" : "defaults");
   queue.begin();
 
-  if (sys.begin(true, true)) {
+  // The co-processor keeps running when only the ESP32 restarts (USB flashing,
+  // OTA, settings) and may still be in low power mode from a previous standby.
+  // If it does not answer, reset it and try again.
+  bool coproc = sys.begin(true, true);
+  for (int attempt = 1; !coproc && attempt <= 2; attempt++) {
+    Serial.printf("[SYS] co-processor not answering, reset #%d\n", attempt);
+    pinMode(PIN_LINK_RESET, OUTPUT);
+    digitalWrite(PIN_LINK_RESET, LOW);
+    delay(100);
+    digitalWrite(PIN_LINK_RESET, HIGH);
+    delay(1500);
+    coproc = sys.begin(true, true);
+  }
+  if (coproc) {
     Serial.printf("[SYS] co-processor type %u\n", sys.devType);
   } else {
-    Serial.println("[SYS] no co-processor (OBD/CAN unavailable)");
+    Serial.println("[SYS] no co-processor (OBD/CAN/voltage unavailable)");
   }
   liveLock();
   live.devType = sys.devType;

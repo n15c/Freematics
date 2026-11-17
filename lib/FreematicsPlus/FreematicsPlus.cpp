@@ -915,7 +915,9 @@ bool FreematicsESP32::begin(bool useCoProc, bool useCellular)
 #endif
         if (linkUART->begin(115200)) {
             link = linkUART;
-            for (byte n = 0; n < 3 && !getDeviceType(); n++);
+            // a co-processor left in low power mode (ATLP) may need several
+            // commands before it answers
+            for (byte n = 0; n < 6 && !getDeviceType(); n++);
             if (devType) {
                 m_flags |= FLAG_USE_UART_LINK;
                 break;
