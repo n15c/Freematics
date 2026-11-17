@@ -33,7 +33,7 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:8px;display:none}
 .hide{display:none}
 </style></head><body>
-<header><h1>Freematics Telelogger</h1><span id="hdr" class="pill">…</span></header>
+<header><h1>Freematics Telelogger <small id="ver" style="font-weight:400;color:var(--mut)"></small></h1><span id="hdr" class="pill">…</span></header>
 <nav id="nav"><button data-t="status" class="on">Status</button><button data-t="server">Server</button><button data-t="net">Netzwerk</button><button data-t="vehicle">Fahrzeug</button><button data-t="can">CAN</button><button data-t="power">Energie</button><button data-t="system">System</button></nav>
 <main>
 <section id="t-status">
@@ -119,7 +119,7 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
 </section>
 
 <section id="t-system" class="hide">
- <div class="card"><h2>Firmware-Update</h2><input type="file" id="fw" accept=".bin"><div class="bar"><button class="btn" onclick="ota()">Hochladen</button><span id="otap"></span></div></div>
+ <div class="card"><h2>Firmware-Update</h2><p class="hint">Installiert: <b id="fwcur">…</b></p><input type="file" id="fw" accept=".bin"><div class="bar"><button class="btn" onclick="ota()">Hochladen</button><span id="otap"></span></div></div>
  <div class="card"><h2>Wartung</h2><div class="bar">
   <button class="btn sec" onclick="post('/api/restart','Neustart…')">Neu starten</button>
   <button class="btn sec" onclick="if(confirm('Warteschlange löschen?'))post('/api/queue/clear','Gelöscht')">Warteschlange löschen</button>
@@ -139,13 +139,13 @@ const hex=(n,w)=>Number(n||0).toString(16).toUpperCase().padStart(w||3,'0');
 const dur=s=>s<0?'–':s<60?s+' s':s<3600?Math.round(s/60)+' min':(s/3600).toFixed(1)+' h';
 async function status(){try{const r=await fetch('/api/status');S=await r.json();}catch(e){$('hdr').className='pill err';$('hdr').textContent='offline';return}
  const st={driving:['Fahrt','ok'],idle:['Zündung aus','warn'],standby:['Standby',''],boot:['Start','']}[S.state]||[S.state];
- $('hdr').className='pill '+st[1];$('hdr').textContent=st[0];
+ $('hdr').className='pill '+st[1];$('hdr').textContent=st[0];$('ver').textContent='v'+S.fw+' · Build '+S.build;$('fwcur').textContent=S.fw+' Build '+S.build+' ('+S.commit+', '+S.buildTime+', '+S.partition+')';otaCheck();
  const v=S.vehicle,g=S.gnss,n=S.net;
  kv('s-veh',[['Zündung',S.ignition?pill('an','ok'):pill('aus')],['Spannung',S.voltage+' V'],['OBD',v.obd?pill('verbunden','ok'):pill('nein')],v.vin&&['VIN',esc(v.vin)],v.dtc.length&&['Fehlercodes',v.dtc.map(d=>pill(d,'err')).join(' ')],['Bewegung',S.motion?'ja':'nein']]);
  kv('s-gnss',[['Fix',g.fix?pill('ja','ok'):pill(g.lat?'veraltet':'nein','warn')],g.lat&&['Position',`<a href="https://www.openstreetmap.org/?mlat=${g.lat}&mlon=${g.lon}#map=15/${g.lat}/${g.lon}" target="_blank">${g.lat}, ${g.lon}</a>`],g.lat&&['Tempo',Math.round(g.speed)+' km/h'],g.lat&&['Satelliten',g.sat+' (HDOP '+(+g.hdop).toFixed(1)+')'],g.lat&&['Alter',dur(g.age)],['Quelle',g.source],g.rejected&&['Verworfen',g.rejected]]);
  kv('s-net',[['Verbindung',n.link=='none'?pill('keine','err'):pill(n.link=='wifi'?'WLAN':'Mobilfunk','ok')],n.modem&&['Modem',esc(n.model)],n.operator&&['Netz',esc(n.operator)+' '+esc(n.netType)+(n.roaming?' '+pill('Roaming','warn'):'')],n.modem&&['Registriert',n.registered?'ja':'nein'],n.rssi&&['Signal',n.rssi+' dBm'],['Gesendet',n.sent+' ('+n.failed+' Fehler)'],['Letzter Upload',dur(n.lastUpload)],['Warteschlange',n.queue+(n.queueFile?' ('+n.queueFile+' im Flash)':'')],n.error&&['Fehler','<span class="err-t">'+esc(n.error)+'</span>']]);
  $('s-vals').innerHTML=v.values.map(x=>`<tr><td>${esc(x.key)}</td><td>${+x.value.toFixed(3)}</td><td>${dur(x.age)}</td></tr>`).join('')||'<tr><td colspan=3>–</td></tr>';
- kv('s-dev',[['Geräte-ID',esc(S.id)],['Firmware',S.fw],['Laufzeit',dur(S.uptime)],n.imei&&['IMEI',n.imei],n.iccid&&['ICCID',n.iccid],n.wifiIp&&['WLAN-IP',n.wifiIp],n.apIp&&['AP-IP',n.apIp],n.cellIp&&['Mobil-IP',n.cellIp],['Typ',S.devType],['Temperatur',S.temp+' °C'],['Freier RAM',Math.round(S.heap/1024)+' KB']]);
+ kv('s-dev',[['Geräte-ID',esc(S.id)],['Firmware',S.fw+' Build '+S.build],['Commit',esc(S.commit)],['Gebaut',esc(S.buildTime)],['Partition',esc(S.partition)],['Laufzeit',dur(S.uptime)],n.imei&&['IMEI',n.imei],n.iccid&&['ICCID',n.iccid],n.wifiIp&&['WLAN-IP',n.wifiIp],n.apIp&&['AP-IP',n.apIp],n.cellIp&&['Mobil-IP',n.cellIp],['Typ',S.devType],['Temperatur',S.temp+' °C'],['Freier RAM',Math.round(S.heap/1024)+' KB']]);
  $('autoId').textContent=S.id;}
 function pidRow(p){const tr=document.createElement('tr');tr.innerHTML=`<td><input value="${hex(p.pid,2)}" size=4></td><td><input value="${esc(p.key)}"></td><td><input type=number value="${p.interval||0}" style="width:70px"></td><td><button class="btn sec" onclick="this.closest('tr').remove()">✕</button></td>`;$('pids').appendChild(tr)}
 function addPid(){pidRow({pid:0x0d,key:'',interval:0})}
@@ -160,7 +160,8 @@ function collect(){const o={};for(const f of fields){const e=$(f);if(!e)continue
 async function save(){const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect())});toast(r.ok?'Gespeichert – Gerät startet neu…':'Fehler beim Speichern');if(r.ok)setTimeout(()=>location.reload(),8000)}
 async function post(u,t){await fetch(u,{method:'POST'});toast(t)}
 async function mon(){await fetch('/api/can/monitor?seconds=30',{method:'POST'});toast('Monitor läuft 30 s');let n=0;const iv=setInterval(async()=>{const d=await (await fetch('/api/can/frames')).json();$('frames').innerHTML=d.frames.sort((a,b)=>a.id-b.id).map(f=>`<tr><td>${hex(f.id)}</td><td><code>${f.data}</code></td><td>${f.count}</td><td>${f.age}</td></tr>`).join('');if(++n>32)clearInterval(iv)},1000)}
-function ota(){const f=$('fw').files[0];if(!f)return;const fd=new FormData();fd.append('fw',f);const x=new XMLHttpRequest();x.upload.onprogress=e=>$('otap').textContent=Math.round(e.loaded*100/e.total)+' %';x.onload=()=>{toast(x.status==200?'Update ok – Neustart…':'Update fehlgeschlagen');if(x.status==200)setTimeout(()=>location.reload(),10000)};x.open('POST','/api/update');x.send(fd)}
+function otaCheck(){let p;try{p=JSON.parse(sessionStorage.getItem('ota')||'null')}catch(e){}if(!p)return;if(S.uptime>(Date.now()-p.t)/1000+5)return;sessionStorage.removeItem('ota');if(S.build!=p.build||S.commit!=p.commit)toast('Update erfolgreich: Build '+p.build+' → '+S.build);else alert('Achtung: Nach dem Neustart läuft immer noch Build '+S.build+' ('+S.commit+'). Das Update wurde nicht übernommen.')}
+function ota(){const f=$('fw').files[0];if(!f)return;const fd=new FormData();fd.append('fw',f);const x=new XMLHttpRequest();x.upload.onprogress=e=>$('otap').textContent=Math.round(e.loaded*100/e.total)+' %';x.onload=()=>{let r={};try{r=JSON.parse(x.responseText)}catch(e){}if(x.status==200){try{sessionStorage.setItem('ota',JSON.stringify({build:S.build,commit:S.commit,t:Date.now()}))}catch(e){}toast('Update übertragen – Neustart…');setTimeout(()=>location.reload(),12000)}else alert('Update fehlgeschlagen: '+(r.error||('HTTP '+x.status)))};x.open('POST','/api/update');x.send(fd)}
 function exp(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(collect(),null,1)],{type:'application/json'}));a.download='telelogger-config.json';a.click()}
 async function impc(){const f=$('imp').files[0];if(!f)return;const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:await f.text()});toast(r.ok?'Importiert – Neustart…':'Import fehlgeschlagen')}
 load();status();setInterval(status,2000);

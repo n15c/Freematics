@@ -19,6 +19,8 @@ jobs:
         env: [freematics_one_plus, freematics_one_plus_psram]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for the build number
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

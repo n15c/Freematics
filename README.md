@@ -54,6 +54,15 @@ pio device monitor
 
 Spätere Updates gehen über das Web UI (*System → Firmware-Update*) mit `.pio/build/<env>/firmware.bin`.
 
+Jeder Build trägt eine **Build-Nummer**: die Anzahl der Git-Commits, dazu der Commit-Hash und die Build-Zeit. Ein `+` hinter dem Hash bedeutet, dass nicht committete Änderungen enthalten sind. Die Nummer erscheint:
+
+- beim Kompilieren (`Firmware build 93 (4bb07fd)`)
+- in der seriellen Konsole beim Start, zusammen mit der aktiven Partition (`ota_0`/`ota_1`)
+- im Web UI in der Kopfzeile und unter *System*
+- in `/api/status`
+
+Nach einem OTA-Update vergleicht das Web UI die Build-Nummer vor und nach dem Neustart. Ist sie unverändert, erscheint eine Warnung. Die aktive Partition wechselt bei jedem erfolgreichen Update.
+
 ## Einrichtung
 
 1. Gerät einstecken und Zündung einschalten.

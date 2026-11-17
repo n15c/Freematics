@@ -21,6 +21,8 @@
 #include "vehicle.h"
 #include "uplink.h"
 #include "webui.h"
+#include "version.h"
+#include <esp_ota_ops.h>
 
 static FreematicsESP32 sys;
 static MEMS_I2C* mems = nullptr;
@@ -312,7 +314,9 @@ void setup()
   liveMutex = xSemaphoreCreateMutex();
   memset(&live, 0, sizeof(live));
   live.bootMs = millis();
-  Serial.printf("\nFreematics Telelogger %s\n", FW_VERSION);
+  const esp_partition_t* part = esp_ota_get_running_partition();
+  Serial.printf("\nFreematics Telelogger %s\n", fwVersionString());
+  Serial.printf("[SYS] running from %s, reset reason %d\n", part ? part->label : "?", (int)esp_reset_reason());
 
 #ifdef PIN_LED
   pinMode(PIN_LED, OUTPUT);

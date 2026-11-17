@@ -10,10 +10,13 @@
 #include "vehicle.h"
 #include "uplink.h"
 #include "webui_page.h"
+#include "version.h"
+#include <esp_ota_ops.h>
 
 static WebServer server(WEB_PORT);
 static volatile uint32_t s_restartAt = 0;
 static bool s_otaOk = false;
+static char s_otaErr[64] = "";
 static volatile uint32_t s_otaActivity = 0;  // millis() of last upload chunk, 0 = no upload
 
 bool webBusy()
@@ -57,6 +60,11 @@ static void handleStatus()
   uint32_t now = millis();
   JsonDocument doc;
   doc["fw"] = FW_VERSION;
+  doc["build"] = fwBuild();
+  doc["commit"] = fwCommit();
+  doc["buildTime"] = fwBuildTime();
+  const esp_partition_t* part = esp_ota_get_running_partition();
+  doc["partition"] = part ? part->label : "?";
   doc["id"] = deviceId();
   doc["uptime"] = (now - l.bootMs) / 1000;
   doc["time"] = (uint32_t)time(nullptr);
@@ -209,8 +217,17 @@ static void handleUpdateDone()
 {
   if (!auth()) return;
   server.sendHeader("Connection", "close");
-  server.send(s_otaOk ? 200 : 500, "application/json", s_otaOk ? "{\"ok\":true}" : "{\"ok\":false}");
+  JsonDocument doc;
+  doc["ok"] = s_otaOk;
+  if (!s_otaOk) doc["error"] = s_otaErr[0] ? s_otaErr : "no firmware received";
+  sendJson(doc, s_otaOk ? 200 : 500);
   if (s_otaOk) s_restartAt = millis() + 1500;
+}
+
+static void otaError()
+{
+  Update.printError(Serial);
+  if (!s_otaErr[0]) strlcpy(s_otaErr, Update.errorString(), sizeof(s_otaErr));
 }
 
 static void handleUpdateUpload()
@@ -220,14 +237,15 @@ static void handleUpdateUpload()
   if (up.status == UPLOAD_FILE_START) {
     Serial.printf("[OTA] %s\n", up.filename.c_str());
     s_otaOk = false;
+    s_otaErr[0] = 0;
     s_otaActivity = millis() | 1;
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) otaError();
   } else if (up.status == UPLOAD_FILE_WRITE) {
     s_otaActivity = millis() | 1;
-    if (Update.write(up.buf, up.currentSize) != up.currentSize) Update.printError(Serial);
+    if (Update.write(up.buf, up.currentSize) != up.currentSize) otaError();
   } else if (up.status == UPLOAD_FILE_END) {
     s_otaOk = Update.end(true);
-    if (!s_otaOk) Update.printError(Serial);
+    if (!s_otaOk) otaError();
     else Serial.printf("[OTA] done, %u bytes\n", up.totalSize);
     s_otaActivity = 0;  // on success the restart keeps webBusy() true
   } else if (up.status == UPLOAD_FILE_ABORTED) {
