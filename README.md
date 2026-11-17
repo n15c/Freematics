@@ -82,6 +82,14 @@ Wann das Gerät in den Standby geht, steuern diese Regeln:
 
 Warum das Gerät gerade wach bleibt, steht im Web UI unter *Status → Fahrzeug → „Kein Standby weil“* und alle 30 s in der seriellen Konsole (`[PWR] no standby: …`).
 
+**Batterieschutz im Standby:**
+
+- WLAN und Web UI sind aus.
+- Der ESP32 geht in Light-Sleep, sobald nichts mehr läuft.
+- GNSS bleibt höchstens 2 h nach dem Abstellen warm.
+- Das Modem bleibt höchstens 24 h im Flugmodus und wird danach ganz ausgeschaltet.
+- Fällt die Bordspannung 1 Minute lang unter *Batterieschutz* (Standard 11,8 V), werden Modem und GNSS ausgeschaltet und keine Heartbeats mehr gesendet. Bei Spannung ≥ Schwelle + 0,3 V oder beim Motorstart läuft wieder alles normal.
+
 Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurieren die Zündung einschalten oder das Fahrzeug bewegen.
 
 ### Traccar

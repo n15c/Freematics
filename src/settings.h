@@ -78,6 +78,7 @@ struct Settings {
   float runVoltage;         // >= this voltage means engine/DC-DC is running
   float wakeDelta;          // voltage rise above parked level that wakes the device
   float motionG;            // motion threshold in g for wakeup
+  float lowVoltage;         // battery protection: below this (parked) everything non-essential is switched off
   uint16_t standbyDelay;    // s after ignition off before entering standby
 };
 

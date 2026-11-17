@@ -23,6 +23,7 @@
 #include "webui.h"
 #include "version.h"
 #include <esp_ota_ops.h>
+#include <esp_sleep.h>
 
 static FreematicsESP32 sys;
 static MEMS_I2C* mems = nullptr;
@@ -276,15 +277,26 @@ static void standby()
   if (!cfg.gnssKeepOn && gnss.standalone()) gnss.end();
   memsCalibrate();
 
+  uint32_t standbyStart = millis();
   uint32_t lastHeartbeat = millis();
   uint32_t lastVolt = 0;
+  uint32_t lowSince = 0;
+  bool saver = false;
   uint32_t baselineSince = millis();
   float baseline = voltage > 5 ? voltage : 0;
   bool wake = false;
   const char* reason = "";
 
   while (!wake) {
-    delay(STANDBY_POLL_MS);
+    // light sleep (ESP32 ~1 mA instead of ~30 mA) when nothing else runs;
+    // not with the standalone GNSS on, its software UART needs the CPU
+    if (uplinkIdle() && !gnss.standalone()) {
+      Serial.flush();
+      esp_sleep_enable_timer_wakeup(STANDBY_POLL_MS * 1000ULL);
+      esp_light_sleep_start();
+    } else {
+      delay(STANDBY_POLL_MS);
+    }
     uint32_t now = millis();
 
     // 1) motion
@@ -304,12 +316,34 @@ static void standby()
         if (now - baselineSince > 1800000UL) { baseline = voltage; baselineSince = now; }
         if (voltage >= cfg.runVoltage) { wake = true; reason = "voltage"; break; }
         if (cfg.wakeDelta > 0 && voltage - baseline >= cfg.wakeDelta) { wake = true; reason = "voltage rise"; break; }
+        // battery protection
+        if (!saver && cfg.lowVoltage > 0 && voltage < cfg.lowVoltage) {
+          if (!lowSince) lowSince = now;
+          if (now - lowSince >= LOW_VOLTAGE_DELAY_MS) {
+            saver = true;
+            Serial.printf("[PWR] battery low (%.2f V): protection on\n", voltage);
+            uplinkSetBatterySaver(true);
+            if (gnss.standalone()) gnss.end();
+          }
+        } else if (voltage >= cfg.lowVoltage) {
+          lowSince = 0;
+          if (saver && voltage >= cfg.lowVoltage + 0.3f) {
+            saver = false;
+            Serial.printf("[PWR] battery recovered (%.2f V)\n", voltage);
+            uplinkSetBatterySaver(false);
+          }
+        }
       }
+    }
+    // GNSS hot standby only for short stops
+    if (gnss.standalone() && now - standbyStart > GNSS_KEEP_ON_MAX_MS) {
+      Serial.println("[GNSS] off (long standby)");
+      gnss.end();
     }
 
     // keep GNSS fix fresh (hot start) and send heartbeats
     gnss.update(); // standalone receiver or modem GNSS fed by the uplink task
-    if (cfg.heartbeatMin && now - lastHeartbeat >= cfg.heartbeatMin * 60000UL) {
+    if (!saver && cfg.heartbeatMin && now - lastHeartbeat >= cfg.heartbeatMin * 60000UL) {
       lastHeartbeat = now;
       Serial.println("[PWR] heartbeat");
       pushRecord(EV_HEARTBEAT);
@@ -319,6 +353,7 @@ static void standby()
   }
 
   Serial.printf("[PWR] wake up (%s, %.2f V)\n", reason, voltage);
+  uplinkSetBatterySaver(false);
   uplinkSetStandby(false);
   vehicle.wake();
   if (gnssHw && !gnss.standalone()) gnss.begin(&sys);

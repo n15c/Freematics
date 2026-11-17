@@ -52,6 +52,7 @@ void settingsDefaults(Settings& s)
   s.runVoltage = 13.2f;
   s.wakeDelta = 0.4f;
   s.motionG = 0.15f;
+  s.lowVoltage = 11.8f;
   s.standbyDelay = 120;
 }
 
@@ -125,6 +126,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool hide)
   o["runVoltage"] = s.runVoltage;
   o["wakeDelta"] = s.wakeDelta;
   o["motionG"] = s.motionG;
+  o["lowVoltage"] = s.lowVoltage;
   o["standbyDelay"] = s.standbyDelay;
 }
 
@@ -221,6 +223,7 @@ void settingsFromJson(Settings& s, JsonObjectConst o)
   getNum(o, "runVoltage", s.runVoltage);
   getNum(o, "wakeDelta", s.wakeDelta);
   getNum(o, "motionG", s.motionG);
+  getNum(o, "lowVoltage", s.lowVoltage);
   getNum(o, "standbyDelay", s.standbyDelay);
 
   // sanity limits

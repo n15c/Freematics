@@ -18,6 +18,8 @@ static FreematicsESP32* s_sys = nullptr;
 static Modem modem;
 static volatile bool s_standby = false;
 static volatile bool s_modemGnss = false;
+static volatile bool s_saver = false;
+static volatile bool s_idle = false;
 static char s_deviceId[32];
 
 static CellState s_cell = CS_OFF;
@@ -51,6 +53,8 @@ const char* deviceId()
 
 void uplinkSetStandby(bool standby) { s_standby = standby; }
 void uplinkUseModemGnss(bool on) { s_modemGnss = on; }
+void uplinkSetBatterySaver(bool on) { s_saver = on; }
+bool uplinkIdle() { return s_idle; }
 
 void systemRestart()
 {
@@ -281,8 +285,14 @@ static void cellService()
 static void cellSleep()
 {
   if (s_cell == CS_DISABLED || s_cell == CS_OFF) return;
-  if (cfg.modemStandby == MODEM_STANDBY_ONLINE) return;
-  if (s_modemGnss && cfg.modemStandby == MODEM_STANDBY_SLEEP && cfg.gnssKeepOn) {
+  if (s_saver) {
+    modem.powerOff();
+    s_cell = CS_OFF;
+    s_cellRetryAt = 0;
+    Serial.println("[CELL] off (battery protection)");
+  } else if (cfg.modemStandby == MODEM_STANDBY_ONLINE) {
+    return;
+  } else if (s_modemGnss && cfg.modemStandby == MODEM_STANDBY_SLEEP && cfg.gnssKeepOn) {
     // keep the module on for GNSS, radio off
     modem.setRadio(false);
     s_cell = CS_SLEEP;
@@ -412,11 +422,21 @@ static void uplinkTask(void*)
     // an upload started over the station link (heartbeat in standby) must finish
     if (standby && !pending && !webBusy()) {
       if (s_cell == CS_READY || s_cell == CS_SEARCH || s_cell == CS_ATTACH) cellSleep();
+      // long parked or battery low: switch the modem off completely
+      if (s_cell == CS_SLEEP && (s_saver || now - standbySince > MODEM_SLEEP_MAX_MS)) {
+        modem.powerOff();
+        s_cell = CS_OFF;
+        s_cellRetryAt = 0;
+        Serial.println("[CELL] off (long standby)");
+      }
       wifiApply(false, false);
-      if (s_modemGnss) periodic(LINK_NONE);
+      bool gnssPoll = s_modemGnss && !s_saver && s_cell != CS_OFF;
+      if (gnssPoll) periodic(LINK_NONE);
+      s_idle = !s_wifiOn && !gnssPoll;
       delay(STANDBY_POLL_MS);
       continue;
     }
+    s_idle = false;
     if (standby) wifiApply(false, true); // station only, for heartbeats / flushing
 
     bool wifiUp = wifiStaUp();
