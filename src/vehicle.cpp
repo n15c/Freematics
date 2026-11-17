@@ -397,10 +397,15 @@ void Vehicle::appendAttrs(char* buf, size_t size, uint32_t maxAge)
 {
   uint32_t now = millis();
   for (int i = 0; i < cfg.pidCount; i++) {
-    if (m_pidTs[i] && now - m_pidTs[i] <= maxAge) appendKV(buf, size, cfg.pids[i].key, m_pidVal[i]);
+    // slowly changing values (read every >= 10 s: fuel, odometer, temperatures)
+    // keep their last known value, also while parked; fast ones (rpm, speed,
+    // load) only while fresh so a parked car does not report a stale rpm
+    bool slow = cfg.pids[i].interval >= 10;
+    if (m_pidTs[i] && (slow || now - m_pidTs[i] <= maxAge)) appendKV(buf, size, cfg.pids[i].key, m_pidVal[i]);
   }
   for (int i = 0; i < cfg.canCount; i++) {
-    if (m_canTs[i] && now - m_canTs[i] <= maxAge) appendKV(buf, size, cfg.can[i].key, m_canVal[i]);
+    bool slow = cfg.can[i].interval >= 10;
+    if (m_canTs[i] && (slow || now - m_canTs[i] <= maxAge)) appendKV(buf, size, cfg.can[i].key, m_canVal[i]);
   }
 }
 

@@ -648,7 +648,9 @@ bool FreematicsESP32::gpsGetData(GPS_DATA** pgd)
             if (!(s = strchr(s, ','))) break;
             gpsData.sat = atoi(++s);
             if (!(s = strchr(s, ','))) break;
-            gpsData.hdop = atoi(++s);
+            // reported in 1/100, GPS_DATA uses 1/10 (like the UART receiver path)
+            int hdop = atoi(++s) / 10;
+            gpsData.hdop = hdop > 255 ? 255 : hdop;
         } while(0);
         // NOTE: plausibility filtering is done by the application (it knows elapsed time
         // and speed). A fixed distance filter here used to lock the position forever
