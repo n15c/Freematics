@@ -41,6 +41,7 @@
 #define HTTP_TIMEOUT_MS 15000
 #define WIFI_CONNECT_TIMEOUT_MS 8000
 #define STANDBY_POLL_MS 200
+#define CONFIG_WINDOW_MS 600000UL     // stay awake (AP on) for 10 min after power-up
 
 // ---------------------------------------------------------------------------
 // Hardware

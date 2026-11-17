@@ -63,7 +63,7 @@ Spätere Updates gehen über das Web UI (*System → Firmware-Update*) mit `.pio
 5. Unter **Netzwerk** Heim-WLAN, APN und SIM-PIN eintragen. Das Passwort des Access-Points und des Web UI sollte man ändern.
 6. Speichern. Das Gerät startet neu.
 
-Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurieren die Zündung einschalten.
+Nach dem Einstecken bleibt das Gerät mindestens 10 Minuten wach, und solange ein Gerät mit dem Access-Point verbunden ist, geht es nie in den Standby. Ist das Heim-WLAN nicht erreichbar, sucht das Gerät nur 15 s danach und versucht es danach alle 2 Minuten erneut, aber nur, wenn niemand mit dem Access-Point verbunden ist. Die Suche würde sonst den Access-Point stören. Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurieren die Zündung einschalten oder das Fahrzeug bewegen.
 
 ### Traccar
 

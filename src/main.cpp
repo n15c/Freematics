@@ -388,7 +388,10 @@ void loop()
   }
 
   // standby when parked long enough and nothing moves
-  if (!ignition && !moving && now - idleSince >= cfg.standbyDelay * 1000UL && now - lastMotion >= 30000) {
+  // never while somebody uses the web UI, and not within the first minutes after
+  // power-up so the device can be configured in a parked car
+  bool configWindow = now - live.bootMs < CONFIG_WINDOW_MS || uplinkApClients() > 0;
+  if (!ignition && !moving && !configWindow && now - idleSince >= cfg.standbyDelay * 1000UL && now - lastMotion >= 30000) {
     standby();
     return;
   }

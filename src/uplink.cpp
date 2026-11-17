@@ -30,6 +30,15 @@ static bool s_wifiOn = false;
 static bool s_apOn = false;
 static bool s_mdns = false;
 static bool s_ntp = false;
+// station connection attempts: while the station searches for an access point
+// that is out of range (home WiFi while driving) the radio keeps hopping
+// channels and the own access point becomes unusable. So the station only
+// tries for a short time and then pauses.
+static bool s_staTrying = false;
+static uint32_t s_staTryStart = 0;
+static uint32_t s_staPauseSince = 0;
+static const uint32_t STA_TRY_MS = 15000;
+static const uint32_t STA_PAUSE_MS = 120000;
 
 static char s_query[RECORD_ATTR_LEN + 420];
 static char s_url[RECORD_ATTR_LEN + 600];
@@ -72,10 +81,15 @@ static void wifiApply(bool awake, bool wantSta)
   wifi_mode_t mode = sta && ap ? WIFI_AP_STA : sta ? WIFI_STA : WIFI_AP;
   if (!s_wifiOn || WiFi.getMode() != mode) {
     WiFi.mode(mode);
+    // same as the original firmware: limits current peaks (modem + WiFi on the
+    // OBD supply) which can otherwise cause brown-outs; plenty inside a car
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
     s_wifiOn = true;
     if (sta) {
       WiFi.setAutoReconnect(true);
       WiFi.begin(cfg.wifiSsid, cfg.wifiPass);
+      s_staTrying = true;
+      s_staTryStart = millis();
       Serial.printf("[WIFI] joining %s\n", cfg.wifiSsid);
     }
   }
@@ -96,10 +110,50 @@ static void wifiApply(bool awake, bool wantSta)
   }
 }
 
+int uplinkApClients()
+{
+  return s_apOn ? WiFi.softAPgetStationNum() : 0;
+}
+
+// throttle station attempts while the access point is on (see above)
+static void staService(bool up)
+{
+  if (!cfg.wifiSsid[0] || !s_wifiOn || !(WiFi.getMode() & WIFI_MODE_STA)) return;
+  uint32_t now = millis();
+  if (up) {
+    s_staTrying = false;
+    return;
+  }
+  if (!s_apOn) {
+    // no access point (standby flush): nothing to disturb, keep trying
+    if (!s_staTrying) {
+      WiFi.setAutoReconnect(true);
+      WiFi.begin(cfg.wifiSsid, cfg.wifiPass);
+      s_staTrying = true;
+      s_staTryStart = now;
+    }
+    return;
+  }
+  if (s_staTrying && now - s_staTryStart > STA_TRY_MS) {
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect(false);
+    s_staTrying = false;
+    s_staPauseSince = now;
+    Serial.printf("[WIFI] %s not reachable, pausing station\n", cfg.wifiSsid);
+  } else if (!s_staTrying && now - s_staPauseSince > STA_PAUSE_MS && uplinkApClients() == 0) {
+    // retry only when nobody uses the web UI
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(cfg.wifiSsid, cfg.wifiPass);
+    s_staTrying = true;
+    s_staTryStart = now;
+  }
+}
+
 static bool wifiStaUp()
 {
   if (!cfg.wifiSsid[0] || !s_wifiOn) return false;
   bool up = WiFi.status() == WL_CONNECTED;
+  staService(up);
   if (up && !s_wifiUpSince) {
     s_wifiUpSince = millis();
     Serial.printf("[WIFI] connected, IP %s\n", WiFi.localIP().toString().c_str());
@@ -109,6 +163,9 @@ static bool wifiStaUp()
     }
   } else if (!up && s_wifiUpSince) {
     s_wifiUpSince = 0;
+    // connection lost: auto reconnect searches now, limit it like a new attempt
+    s_staTrying = true;
+    s_staTryStart = millis();
     Serial.println("[WIFI] disconnected");
   }
   return up;

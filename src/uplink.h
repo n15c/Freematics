@@ -8,6 +8,8 @@ void uplinkBegin(FreematicsESP32* sys);
 void uplinkSetStandby(bool standby);
 // use the modem's GNSS (no standalone receiver)
 void uplinkUseModemGnss(bool on);
+// number of clients connected to the own access point (web UI in use)
+int uplinkApClients();
 // unique id used in the protocol
 const char* deviceId();
 // persist queue and restart (used by web UI)
