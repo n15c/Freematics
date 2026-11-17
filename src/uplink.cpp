@@ -10,6 +10,7 @@
 #include "osmand.h"
 #include "modem.h"
 #include "gnss.h"
+#include "webui.h"
 
 enum CellState : uint8_t { CS_DISABLED = 0, CS_OFF, CS_SLEEP, CS_SEARCH, CS_ATTACH, CS_READY };
 
@@ -408,7 +409,8 @@ static void uplinkTask(void*)
       tryStart = 0;
       if (!standby) gaveUpAt = 0;
     }
-    if (standby && !pending) {
+    // an upload started over the station link (heartbeat in standby) must finish
+    if (standby && !pending && !webBusy()) {
       if (s_cell == CS_READY || s_cell == CS_SEARCH || s_cell == CS_ATTACH) cellSleep();
       wifiApply(false, false);
       if (s_modemGnss) periodic(LINK_NONE);

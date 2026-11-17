@@ -12,8 +12,17 @@
 #include "webui_page.h"
 
 static WebServer server(WEB_PORT);
-static uint32_t s_restartAt = 0;
+static volatile uint32_t s_restartAt = 0;
 static bool s_otaOk = false;
+static volatile uint32_t s_otaActivity = 0;  // millis() of last upload chunk, 0 = no upload
+
+bool webBusy()
+{
+  uint32_t t = s_otaActivity;
+  // an upload that stalls for more than 60 s is considered dead
+  if (t && millis() - t < 60000) return true;
+  return s_restartAt != 0;
+}
 
 static bool auth()
 {
@@ -211,15 +220,19 @@ static void handleUpdateUpload()
   if (up.status == UPLOAD_FILE_START) {
     Serial.printf("[OTA] %s\n", up.filename.c_str());
     s_otaOk = false;
+    s_otaActivity = millis() | 1;
     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_WRITE) {
+    s_otaActivity = millis() | 1;
     if (Update.write(up.buf, up.currentSize) != up.currentSize) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_END) {
     s_otaOk = Update.end(true);
     if (!s_otaOk) Update.printError(Serial);
     else Serial.printf("[OTA] done, %u bytes\n", up.totalSize);
+    s_otaActivity = 0;  // on success the restart keeps webBusy() true
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     Update.abort();
+    s_otaActivity = 0;
   }
 }
 
