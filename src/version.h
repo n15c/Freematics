@@ -7,5 +7,6 @@ const char* fwCommit();    // short git hash, "+" = uncommitted changes
 const char* fwBuildTime(); // UTC build time
 uint32_t fwCommitEpoch();  // commit time of the build (orders builds for updates)
 const char* fwEnv();       // PlatformIO environment (selects the update file)
+const char* fwBranch();    // git branch of the build ("master" = release)
 // "2.0.0 build 42 (abc1234, 2026-11-17 18:00 UTC)"
 const char* fwVersionString();

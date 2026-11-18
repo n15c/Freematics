@@ -425,7 +425,11 @@ void setup()
   live.bootMs = millis();
   const esp_partition_t* part = esp_ota_get_running_partition();
   Log.printf("\nFreematics Telelogger %s\n", fwVersionString());
-  Log.printf("[SYS] running from %s, reset reason %d\n", part ? part->label : "?", (int)esp_reset_reason());
+  esp_ota_img_states_t otaState = ESP_OTA_IMG_UNDEFINED;
+  if (part) esp_ota_get_state_partition(part, &otaState);
+  const esp_partition_t* bootPart = esp_ota_get_boot_partition();
+  Log.printf("[SYS] running from %s (state %d, boot partition %s), reset reason %d\n", part ? part->label : "?",
+             (int)otaState, bootPart ? bootPart->label : "?", (int)esp_reset_reason());
   powerOnBoot = esp_reset_reason() == ESP_RST_POWERON || esp_reset_reason() == ESP_RST_BROWNOUT;
 
 #ifdef PIN_LED

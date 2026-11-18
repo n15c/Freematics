@@ -25,11 +25,15 @@ uint32_t fwBuild() { return FW_BUILD; }
 const char* fwCommit() { return FW_COMMIT; }
 const char* fwBuildTime() { return FW_BUILD_TIME; }
 uint32_t fwCommitEpoch() { return FW_COMMIT_EPOCH; }
+#ifndef FW_BRANCH
+#define FW_BRANCH "unknown"
+#endif
 const char* fwEnv() { return FW_ENV; }
+const char* fwBranch() { return FW_BRANCH; }
 
 const char* fwVersionString()
 {
-  static char buf[80];
-  if (!buf[0]) snprintf(buf, sizeof(buf), "%s build %u (%s, %s)", FW_VERSION, (unsigned)FW_BUILD, FW_COMMIT, FW_BUILD_TIME);
+  static char buf[160];
+  if (!buf[0]) snprintf(buf, sizeof(buf), "%s build %u (%s, %s, %s)", FW_VERSION, (unsigned)FW_BUILD, FW_COMMIT, FW_BRANCH, FW_BUILD_TIME);
   return buf;
 }

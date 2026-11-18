@@ -171,9 +171,9 @@ static void check(bool manual)
     s_busy = false;
     return;
   }
-  if (!fwCommitEpoch() && !manual) {
-    // development build without git information: only update on request
-    setResult("Build %u verfügbar (eigener Build, nur manuell)", (unsigned)build);
+  if ((!fwCommitEpoch() || strcmp(fwBranch(), "master")) && !manual) {
+    // development build (other branch / no git info): only update on request
+    setResult("Build %u verfügbar (Entwicklungs-Build läuft, nur manuell)", (unsigned)build);
     s_busy = false;
     return;
   }
