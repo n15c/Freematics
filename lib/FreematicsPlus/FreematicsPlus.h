@@ -150,6 +150,9 @@ public:
   int gpsGetNMEA(char* buffer, int bufsize);
   // send command string to GPS
   void gpsSendCommand(const uint8_t* cmd, int len);
+  // capture raw receiver output (UART receivers only)
+  void gpsCaptureStart(uint8_t* buf, int size);
+  int gpsCaptureStop();
   // start xBee UART communication
   bool xbBegin(unsigned long baudrate = BEE_BAUDRATE, int pinRx = PIN_BEE_UART_RXD, int pinTx = PIN_BEE_UART_TXD);
   void xbEnd();

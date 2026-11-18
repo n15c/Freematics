@@ -132,6 +132,8 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
   <p class="hint">Status: <b id="otaRes">…</b></p>
   <div class="bar"><button class="btn sec" onclick="post('/api/ota/check','Prüfung gestartet…')">Jetzt prüfen &amp; installieren</button><button class="btn" onclick="save()">Speichern &amp; neu starten</button></div></div>
  <div class="card"><h2>Firmware-Update (Datei)</h2><p class="hint">Installiert: <b id="fwcur">…</b></p><input type="file" id="fw" accept=".bin"><div class="bar"><button class="btn" onclick="ota()">Hochladen</button><span id="otap"></span></div></div>
+ <div class="card"><h2>GNSS-Diagnose (Test)</h2><p class="hint">Prüft, ob der GNSS-Empfänger UBX-Befehle versteht und seine Satellitendaten ausgelesen werden können (Voraussetzung für einen schnelleren Start). Dauert ca. 10 s, Ergebnis im Log ([PROBE]).</p>
+  <div class="bar"><button class="btn sec" onclick="post('/api/gnss/probe','Diagnose läuft, siehe Log');setTimeout(()=>document.querySelector('nav button[data-t=log]').click(),500)">GNSS-Diagnose starten</button></div></div>
  <div class="card"><h2>Wartung</h2><div class="bar">
   <button class="btn sec" onclick="post('/api/restart','Neustart…')">Neu starten</button>
   <button class="btn sec" onclick="if(confirm('Warteschlange löschen?'))post('/api/queue/clear','Gelöscht')">Warteschlange löschen</button>

@@ -24,6 +24,7 @@
 #include "webui.h"
 #include "version.h"
 #include "ota.h"
+#include "gnss_probe.h"
 #include <esp_ota_ops.h>
 #include <esp_sleep.h>
 
@@ -497,6 +498,7 @@ void loop()
   }
   updateIgnition();
   vehicle.update(ignition);
+  gnssProbeService(&sys);
 
   // record scheduling
   bool moving = gnss.hasFix(5000) && f.speed > 10;
