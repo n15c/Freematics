@@ -1,3 +1,4 @@
+#include "log.h"
 #include "vehicle.h"
 #include "live.h"
 #include "util.h"
@@ -9,7 +10,8 @@ Vehicle vehicle;
 static float pidScale(uint8_t pid)
 {
   switch (pid) {
-  case 0xA6: return 0.1f;   // odometer, 0.1 km
+  // odometer: ECU reports 0.1 km, Traccar's obdOdometer is in meters
+  case 0xA6: return 100.0f;
   default: return 1.0f;
   }
 }
@@ -41,7 +43,10 @@ float Vehicle::readVoltage()
   if (!m_sys) return 0;
   if (m_sys->devType > 12) {
     // newer units measure the OBD supply directly on the ESP32
-    return (float)(analogRead(A0) * 45) / 4095;
+    // single ADC samples are noisy (several 0.1 V): average them
+    uint32_t sum = 0;
+    for (int i = 0; i < 16; i++) sum += analogRead(A0);
+    return (float)(sum / 16 * 45) / 4095;
   }
   return m_obd.getVoltage();
 }
@@ -97,7 +102,7 @@ bool Vehicle::initLink(bool allowAuto)
     uint8_t p = cfg.obdProtocol ? cfg.obdProtocol : nvsGetLastProtocol();
     if (p) {
       ok = m_obd.init((OBD_PROTOCOLS)p);
-      if (ok) Serial.printf("[OBD] connected with protocol %X\n", p);
+      if (ok) Log.printf("[OBD] connected with protocol %X\n", p);
     }
     if (!ok && !cfg.obdProtocol && allowAuto) {
       char buf[16];
@@ -109,14 +114,14 @@ bool Vehicle::initLink(bool allowAuto)
       m_proto = queryProtocol();
       if (!m_proto) m_proto = p;
       if (m_proto && !cfg.obdProtocol) nvsSetLastProtocol(m_proto);
-      Serial.printf("[OBD] ECU on, protocol %X\n", m_proto);
+      Log.printf("[OBD] ECU on, protocol %X\n", m_proto);
     }
   }
   if (!ok && cfg.canEnabled && cfg.canCount) {
     ok = rawInit(cfg.canProtocol);
     if (ok) {
       m_proto = cfg.canProtocol;
-      Serial.printf("[CAN] listening with protocol %X\n", m_proto);
+      Log.printf("[CAN] listening with protocol %X\n", m_proto);
     }
   }
   m_ext29 = isExt29(m_proto);
@@ -130,7 +135,7 @@ void Vehicle::readVinDtc()
     liveLock();
     strlcpy(live.vin, buf, sizeof(live.vin));
     liveUnlock();
-    Serial.printf("[OBD] VIN %s\n", buf);
+    Log.printf("[OBD] VIN %s\n", buf);
   }
   uint16_t dtc[6] = {0};
   int n = m_obd.readDTC(dtc, 6);
@@ -145,7 +150,7 @@ void Vehicle::update(bool ignition)
   if (!m_obd.link || (!cfg.obdEnabled && !(cfg.canEnabled && cfg.canCount))) return;
   uint32_t now = millis();
   if (!m_ready) {
-    uint32_t retry = ignition ? OBD_RETRY_MS : 15000;
+    uint32_t retry = ignition ? OBD_RETRY_MS : 30000;
     if (m_lastTry && now - m_lastTry < retry) return;
     m_lastTry = now;
     // the protocol auto search takes seconds: only with ignition on
@@ -159,6 +164,12 @@ void Vehicle::update(bool ignition)
     m_lastTry = now;
   }
 
+  if (m_obdMode && !ignition) {
+    // ignition off: only check whether the engine runs (smart alternators keep
+    // the voltage low) and otherwise leave the bus alone so the car can sleep
+    pollRpm();
+    return;
+  }
   if (m_obdMode) {
     pollPids();
     if (!m_ready) return;
@@ -193,20 +204,41 @@ void Vehicle::pollPids()
       m_pidVal[i] = value * pidScale(p.pid);
       m_pidTs[i] = millis();
       liveSetValue(p.key, m_pidVal[i]);
+      if (p.pid == 0x0C) { m_rpm = value; m_rpmTs = m_pidTs[i]; }
     }
-    if (m_obd.errors >= 5) {
-      Serial.println("[OBD] ECU not responding");
-      m_obd.errors = 0;
-      m_ready = false;
-      m_obdMode = false;
-      m_lastTry = millis();
-      liveLock();
-      live.obdConnected = false;
-      liveUnlock();
-      return;
-    }
+    if (checkObdErrors()) return;
   }
   if (cfg.pidCount) m_pidCursor = (m_pidCursor + 1) % cfg.pidCount;
+}
+
+bool Vehicle::checkObdErrors()
+{
+  if (m_obd.errors < 5) return false;
+  Log.println("[OBD] ECU not responding");
+  m_obd.errors = 0;
+  m_ready = false;
+  m_obdMode = false;
+  m_rpm = 0;
+  m_lastTry = millis();
+  liveLock();
+  live.obdConnected = false;
+  liveUnlock();
+  return true;
+}
+
+void Vehicle::pollRpm()
+{
+  uint32_t now = millis();
+  if (m_rpmRead && now - m_rpmRead < 5000) return;
+  m_rpmRead = now;
+  int value;
+  if (m_obd.readPID(0x0C, value)) {
+    m_rpm = value;
+    m_rpmTs = millis();
+  } else {
+    m_obd.errors += 2; // give up quickly when the ECUs went to sleep
+  }
+  checkObdErrors();
 }
 
 void Vehicle::restoreHeader()
@@ -370,10 +402,15 @@ void Vehicle::appendAttrs(char* buf, size_t size, uint32_t maxAge)
 {
   uint32_t now = millis();
   for (int i = 0; i < cfg.pidCount; i++) {
-    if (m_pidTs[i] && now - m_pidTs[i] <= maxAge) appendKV(buf, size, cfg.pids[i].key, m_pidVal[i]);
+    // slowly changing values (read every >= 10 s: fuel, odometer, temperatures)
+    // keep their last known value, also while parked; fast ones (rpm, speed,
+    // load) only while fresh so a parked car does not report a stale rpm
+    bool slow = cfg.pids[i].interval >= 10;
+    if (m_pidTs[i] && (slow || now - m_pidTs[i] <= maxAge)) appendKV(buf, size, cfg.pids[i].key, m_pidVal[i]);
   }
   for (int i = 0; i < cfg.canCount; i++) {
-    if (m_canTs[i] && now - m_canTs[i] <= maxAge) appendKV(buf, size, cfg.can[i].key, m_canVal[i]);
+    bool slow = cfg.can[i].interval >= 10;
+    if (m_canTs[i] && (slow || now - m_canTs[i] <= maxAge)) appendKV(buf, size, cfg.can[i].key, m_canVal[i]);
   }
 }
 

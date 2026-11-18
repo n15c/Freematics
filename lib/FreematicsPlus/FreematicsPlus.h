@@ -173,6 +173,8 @@ public:
   bool reactivateLink();
 	// get device type
 	byte getDeviceType();
+  // GNSS receiver is read through the co-processor (switched off by its low power mode)
+  bool gpsUsesLink() { return (m_flags & FLAG_GNSS_USE_LINK) != 0; }
 	// co-processor firmware version number
 	byte devType = 0;
 	// co-processor link

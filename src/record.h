@@ -9,6 +9,7 @@ enum RecordEvent : uint8_t {
   EV_IGNITION_OFF,
   EV_HEARTBEAT,
   EV_BOOT,
+  EV_WAKE,
 };
 
 struct Record {

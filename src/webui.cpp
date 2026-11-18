@@ -1,3 +1,4 @@
+#include "log.h"
 #include "webui.h"
 #include <WiFi.h>
 #include <WebServer.h>
@@ -10,13 +11,35 @@
 #include "vehicle.h"
 #include "uplink.h"
 #include "webui_page.h"
+#include "version.h"
+#include "ota.h"
+#include <esp_ota_ops.h>
 
 static WebServer server(WEB_PORT);
-static uint32_t s_restartAt = 0;
+static volatile uint32_t s_restartAt = 0;
 static bool s_otaOk = false;
+static char s_otaErr[64] = "";
+static volatile uint32_t s_otaActivity = 0;  // millis() of last upload chunk, 0 = no upload
+
+bool webBusy()
+{
+  uint32_t t = s_otaActivity;
+  // an upload that stalls for more than 60 s is considered dead
+  if (t && millis() - t < 60000) return true;
+  return s_restartAt != 0;
+}
+
+static volatile uint32_t s_lastRequest = 0;
+
+bool webRecentlyUsed(uint32_t ms)
+{
+  uint32_t t = s_lastRequest;
+  return t && millis() - t < ms;
+}
 
 static bool auth()
 {
+  s_lastRequest = millis() | 1;
   if (!cfg.webPass[0]) return true;
   if (server.authenticate("admin", cfg.webPass)) return true;
   server.requestAuthentication(BASIC_AUTH, "Freematics");
@@ -48,6 +71,12 @@ static void handleStatus()
   uint32_t now = millis();
   JsonDocument doc;
   doc["fw"] = FW_VERSION;
+  doc["build"] = fwBuild();
+  doc["commit"] = fwCommit();
+  doc["buildTime"] = fwBuildTime();
+  const esp_partition_t* part = esp_ota_get_running_partition();
+  doc["partition"] = part ? part->label : "?";
+  otaStatusJson(doc["ota"].to<JsonObject>());
   doc["id"] = deviceId();
   doc["uptime"] = (now - l.bootMs) / 1000;
   doc["time"] = (uint32_t)time(nullptr);
@@ -55,6 +84,7 @@ static void handleStatus()
   static const char* states[] = {"boot", "driving", "idle", "standby"};
   doc["state"] = states[l.powerState < 4 ? l.powerState : 0];
   doc["ignition"] = l.ignition;
+  doc["standbyBlocker"] = l.standbyBlocker;
   doc["motion"] = l.motion;
   doc["voltage"] = serialized(String(l.voltage, 2));
   doc["devType"] = l.devType;
@@ -177,6 +207,29 @@ static void handleQueueClear()
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
+// /api/log?from=<pos>: log text from that position (incremental reads);
+// header X-Log-Next = position to pass next time
+static void handleLog()
+{
+  if (!auth()) return;
+  uint32_t from = server.hasArg("from") ? strtoul(server.arg("from").c_str(), nullptr, 10) : 0;
+  static char buf[6200];
+  uint32_t next;
+  size_t n = logRead(from, buf, sizeof(buf) - 1, next);
+  buf[n] = 0;
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("X-Log-Next", String(next));
+  server.sendHeader("Access-Control-Expose-Headers", "X-Log-Next");
+  server.send(200, "text/plain; charset=utf-8", buf);
+}
+
+static void handleOtaCheck()
+{
+  if (!auth()) return;
+  otaRequestCheck();
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 static void handleCanMonitor()
 {
   if (!auth()) return;
@@ -200,8 +253,17 @@ static void handleUpdateDone()
 {
   if (!auth()) return;
   server.sendHeader("Connection", "close");
-  server.send(s_otaOk ? 200 : 500, "application/json", s_otaOk ? "{\"ok\":true}" : "{\"ok\":false}");
+  JsonDocument doc;
+  doc["ok"] = s_otaOk;
+  if (!s_otaOk) doc["error"] = s_otaErr[0] ? s_otaErr : "no firmware received";
+  sendJson(doc, s_otaOk ? 200 : 500);
   if (s_otaOk) s_restartAt = millis() + 1500;
+}
+
+static void otaError()
+{
+  Update.printError(Log);
+  if (!s_otaErr[0]) strlcpy(s_otaErr, Update.errorString(), sizeof(s_otaErr));
 }
 
 static void handleUpdateUpload()
@@ -209,17 +271,22 @@ static void handleUpdateUpload()
   if (cfg.webPass[0] && !server.authenticate("admin", cfg.webPass)) return;
   HTTPUpload& up = server.upload();
   if (up.status == UPLOAD_FILE_START) {
-    Serial.printf("[OTA] %s\n", up.filename.c_str());
+    Log.printf("[OTA] %s\n", up.filename.c_str());
     s_otaOk = false;
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+    s_otaErr[0] = 0;
+    s_otaActivity = millis() | 1;
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) otaError();
   } else if (up.status == UPLOAD_FILE_WRITE) {
-    if (Update.write(up.buf, up.currentSize) != up.currentSize) Update.printError(Serial);
+    s_otaActivity = millis() | 1;
+    if (Update.write(up.buf, up.currentSize) != up.currentSize) otaError();
   } else if (up.status == UPLOAD_FILE_END) {
     s_otaOk = Update.end(true);
-    if (!s_otaOk) Update.printError(Serial);
-    else Serial.printf("[OTA] done, %u bytes\n", up.totalSize);
+    if (!s_otaOk) otaError();
+    else Log.printf("[OTA] done, %u bytes\n", up.totalSize);
+    s_otaActivity = 0;  // on success the restart keeps webBusy() true
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     Update.abort();
+    s_otaActivity = 0;
   }
 }
 
@@ -244,6 +311,8 @@ void webBegin()
   server.on("/api/reset", HTTP_POST, handleReset);
   server.on("/api/restart", HTTP_POST, handleRestart);
   server.on("/api/queue/clear", HTTP_POST, handleQueueClear);
+  server.on("/api/log", HTTP_GET, handleLog);
+  server.on("/api/ota/check", HTTP_POST, handleOtaCheck);
   server.on("/api/can/monitor", HTTP_POST, handleCanMonitor);
   server.on("/api/can/frames", HTTP_GET, handleCanFrames);
   server.on("/api/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);

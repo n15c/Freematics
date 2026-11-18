@@ -12,6 +12,7 @@
  ******************************************************************************/
 #include <FreematicsPlus.h>
 #include <math.h>
+#include "log.h"
 #include "config.h"
 #include "settings.h"
 #include "live.h"
@@ -21,6 +22,10 @@
 #include "vehicle.h"
 #include "uplink.h"
 #include "webui.h"
+#include "version.h"
+#include "ota.h"
+#include <esp_ota_ops.h>
+#include <esp_sleep.h>
 
 static FreematicsESP32 sys;
 static MEMS_I2C* mems = nullptr;
@@ -38,7 +43,8 @@ static uint16_t lastRecordCourse = 0;
 static uint32_t lastVoltageCheck = 0;
 static float voltage = 0;
 static int deviceTemp = 0;
-static bool gnssHw = false;   // standalone receiver found at boot
+static bool gnssHw = false;      // standalone receiver found at boot
+static bool powerOnBoot = false; // plugged in (not a software restart)
 
 static bool clockValid() { return time(nullptr) > 1700000000; }
 
@@ -56,18 +62,18 @@ static void memsInit()
 {
   mems = new ICM_42627;
   if (mems->begin()) {
-    Serial.println("[MEMS] ICM-42627");
+    Log.println("[MEMS] ICM-42627");
     return;
   }
   delete mems;
   mems = new ICM_20948_I2C;
   if (mems->begin()) {
-    Serial.println("[MEMS] ICM-20948");
+    Log.println("[MEMS] ICM-20948");
     return;
   }
   delete mems;
   mems = nullptr;
-  Serial.println("[MEMS] none");
+  Log.println("[MEMS] none");
 }
 
 static void memsCalibrate()
@@ -104,7 +110,7 @@ static float memsMotion()
 // ---------------------------------------------------------------------------
 // records
 // ---------------------------------------------------------------------------
-static void pushRecord(uint8_t event)
+static void pushRecord(uint8_t event, const char* extra = nullptr)
 {
   if (!cfg.serverUrl[0]) return;
   static Record r;
@@ -125,6 +131,7 @@ static void pushRecord(uint8_t event)
   r.motion = (lastMotion && millis() - lastMotion < 10000) || r.speed > 5;
   r.power = voltage;
   r.event = event;
+  if (extra) strlcpy(r.attrs, extra, sizeof(r.attrs));
   liveLock();
   r.rssi = (int8_t)constrain(live.rssi, -127, 0);
   char vin[18];
@@ -198,7 +205,10 @@ static void checkVoltage()
 static bool ignitionCondition()
 {
   if (voltage >= cfg.runVoltage) return true;
-  if (vehicle.obdConnected()) return true;
+  // engine running although the voltage is low (smart alternator)
+  if (vehicle.engineRunning()) return true;
+  // no voltage measurement available at all: fall back to "ECU answers"
+  if (voltage <= 0 && vehicle.obdConnected()) return true;
   return false;
 }
 
@@ -211,11 +221,11 @@ static void updateIgnition()
     if (!ignition) {
       if (!ignitionCandidateSince) ignitionCandidateSince = now;
       // short debounce against voltage spikes
-      if (now - ignitionCandidateSince >= 1500 || vehicle.obdConnected()) {
+      if (now - ignitionCandidateSince >= 1500 || vehicle.engineRunning()) {
         ignition = true;
         ignitionCandidateSince = 0;
         state = PS_DRIVING;
-        Serial.printf("[PWR] ignition ON (%.2f V)\n", voltage);
+        Log.printf("[PWR] ignition ON (%.2f V)\n", voltage);
         pushRecord(EV_IGNITION_ON);
       }
     }
@@ -229,7 +239,7 @@ static void updateIgnition()
         ignitionOffSince = 0;
         state = PS_IDLE;
         idleSince = now;
-        Serial.printf("[PWR] ignition OFF (%.2f V)\n", voltage);
+        Log.printf("[PWR] ignition OFF (%.2f V)\n", voltage);
         pushRecord(EV_IGNITION_OFF);
       }
     }
@@ -239,32 +249,73 @@ static void updateIgnition()
 // ---------------------------------------------------------------------------
 // standby
 // ---------------------------------------------------------------------------
+// reason why the device stays awake, nullptr = standby now
+static const char* standbyBlocker(uint32_t now, bool moving)
+{
+  static char buf[64];
+  if (ignition) return "ignition on";
+  if (moving) return "vehicle moving (GNSS)";
+  if (now - lastMotion < 30000) return "motion detected (MEMS)";
+  if (webBusy() || otaBusy()) return "firmware update";
+  if (webRecentlyUsed(WEB_ACTIVE_MS)) return "web UI in use";
+  if (powerOnBoot && now - live.bootMs < CONFIG_WINDOW_MS) {
+    snprintf(buf, sizeof(buf), "configuration window after power-up (%lus left)",
+             (unsigned long)(CONFIG_WINDOW_MS - (now - live.bootMs)) / 1000);
+    return buf;
+  }
+  uint32_t idle = now - idleSince;
+  if (idle < cfg.standbyDelay * 1000UL) {
+    snprintf(buf, sizeof(buf), "standby delay (%lus left)", (unsigned long)(cfg.standbyDelay * 1000UL - idle) / 1000);
+    return buf;
+  }
+  return nullptr;
+}
 static void standby()
 {
-  Serial.println("[PWR] entering standby");
+  Log.println("[PWR] entering standby");
   state = PS_STANDBY;
   publishLive();
   uplinkSetStandby(true);
+  // a receiver behind the co-processor is switched off by its low power mode
+  // anyway; switch it off cleanly before the co-processor goes to sleep
+  if (gnss.standalone() && (!cfg.gnssKeepOn || gnss.viaCoprocessor())) gnss.end();
   vehicle.sleep();
-  if (!cfg.gnssKeepOn && gnss.standalone()) gnss.end();
   memsCalibrate();
 
+  uint32_t standbyStart = millis();
   uint32_t lastHeartbeat = millis();
   uint32_t lastVolt = 0;
-  uint32_t baselineSince = millis();
+  uint32_t lowSince = 0;
+  bool saver = false;
+  uint8_t voltHits = 0;
   float baseline = voltage > 5 ? voltage : 0;
   bool wake = false;
   const char* reason = "";
 
   while (!wake) {
-    delay(STANDBY_POLL_MS);
+    // light sleep (ESP32 ~1 mA instead of ~30 mA) when nothing else runs;
+    // not with the standalone GNSS on, its software UART needs the CPU
+    if (uplinkIdle() && !gnss.standalone()) {
+      Serial.flush();
+      esp_sleep_enable_timer_wakeup(STANDBY_POLL_MS * 1000ULL);
+      esp_light_sleep_start();
+    } else {
+      delay(STANDBY_POLL_MS);
+    }
     uint32_t now = millis();
 
-    // 1) motion
+    // 1) motion: two consecutive samples (400 ms) above the threshold, a
+    // single spike (door, passing truck, sensor noise) does not wake up
+    static uint8_t motionHits = 0;
     if (mems && memsMotion() >= cfg.motionG) {
-      wake = true;
-      reason = "motion";
-      break;
+      if (++motionHits >= 2) {
+        motionHits = 0;
+        wake = true;
+        reason = "motion";
+        break;
+      }
+    } else {
+      motionHits = 0;
     }
 
     // 2) voltage: engine running or a clear rise above the parked level
@@ -273,44 +324,92 @@ static void standby()
       lastVolt = now;
       checkVoltage();
       if (voltage > 5) {
-        if (!baseline || voltage < baseline) baseline = voltage;
-        if (now - baselineSince > 1800000UL) { baseline = voltage; baselineSince = now; }
-        if (voltage >= cfg.runVoltage) { wake = true; reason = "voltage"; break; }
-        if (cfg.wakeDelta > 0 && voltage - baseline >= cfg.wakeDelta) { wake = true; reason = "voltage rise"; break; }
+        // baseline follows the parked voltage slowly (a minimum would lock onto
+        // a single low outlier and every normal reading would look like a rise)
+        if (!baseline) baseline = voltage;
+        bool high = voltage >= cfg.runVoltage;
+        bool rise = cfg.wakeDelta > 0 && voltage - baseline >= cfg.wakeDelta;
+        if (high || rise) {
+          // must hold for 3 readings in a row
+          if (++voltHits >= 3) {
+            wake = true;
+            reason = high ? "voltage" : "voltage rise";
+            break;
+          }
+        } else {
+          voltHits = 0;
+          baseline += (voltage - baseline) * 0.05f;
+        }
+        // battery protection
+        if (!saver && cfg.lowVoltage > 0 && voltage < cfg.lowVoltage) {
+          if (!lowSince) lowSince = now;
+          if (now - lowSince >= LOW_VOLTAGE_DELAY_MS) {
+            saver = true;
+            Log.printf("[PWR] battery low (%.2f V): protection on\n", voltage);
+            uplinkSetBatterySaver(true);
+            if (gnss.standalone()) gnss.end();
+          }
+        } else if (voltage >= cfg.lowVoltage) {
+          lowSince = 0;
+          if (saver && voltage >= cfg.lowVoltage + 0.3f) {
+            saver = false;
+            Log.printf("[PWR] battery recovered (%.2f V)\n", voltage);
+            uplinkSetBatterySaver(false);
+          }
+        }
       }
+    }
+    // GNSS hot standby only for short stops
+    if (gnss.standalone() && now - standbyStart > GNSS_KEEP_ON_MAX_MS) {
+      Log.println("[GNSS] off (long standby)");
+      gnss.end();
     }
 
     // keep GNSS fix fresh (hot start) and send heartbeats
     gnss.update(); // standalone receiver or modem GNSS fed by the uplink task
-    if (cfg.heartbeatMin && now - lastHeartbeat >= cfg.heartbeatMin * 60000UL) {
+    if (!saver && cfg.heartbeatMin && now - lastHeartbeat >= cfg.heartbeatMin * 60000UL) {
       lastHeartbeat = now;
-      Serial.println("[PWR] heartbeat");
+      Log.println("[PWR] heartbeat");
       pushRecord(EV_HEARTBEAT);
     }
     static uint32_t lastPub = 0;
     if (now - lastPub > 2000) { lastPub = now; publishLive(); }
   }
 
-  Serial.printf("[PWR] wake up (%s, %.2f V)\n", reason, voltage);
+  Log.printf("[PWR] wake up (%s, %.2f V)\n", reason, voltage);
+  uplinkSetBatterySaver(false);
   uplinkSetStandby(false);
   vehicle.wake();
-  if (gnssHw && !gnss.standalone()) gnss.begin(&sys);
+  if (gnssHw && (!gnss.standalone() || !gnss.hasFix(30000))) {
+    // off, or on but without data (e.g. behind the sleeping co-processor)
+    if (gnss.standalone()) gnss.end();
+    gnss.begin(&sys);
+  }
   gnss.resetFilter();
   state = PS_IDLE;
   idleSince = millis();
   lastMotion = millis();
   // report immediately: the server sees the car is awake within seconds
-  pushRecord(EV_NONE);
+  char extra[48];
+  snprintf(extra, sizeof(extra), "&wakeReason=%s&wakeVoltage=%.2f", reason, voltage);
+  for (char* c = extra; *c; c++) if (*c == ' ') *c = '_';
+  pushRecord(EV_WAKE, extra);
 }
 
 // ---------------------------------------------------------------------------
 void setup()
 {
+  // give the co-processor time to boot when everything powers up together
+  delay(500);
   Serial.begin(115200);
+  logBegin();
   liveMutex = xSemaphoreCreateMutex();
   memset(&live, 0, sizeof(live));
   live.bootMs = millis();
-  Serial.printf("\nFreematics Telelogger %s\n", FW_VERSION);
+  const esp_partition_t* part = esp_ota_get_running_partition();
+  Log.printf("\nFreematics Telelogger %s\n", fwVersionString());
+  Log.printf("[SYS] running from %s, reset reason %d\n", part ? part->label : "?", (int)esp_reset_reason());
+  powerOnBoot = esp_reset_reason() == ESP_RST_POWERON || esp_reset_reason() == ESP_RST_BROWNOUT;
 
 #ifdef PIN_LED
   pinMode(PIN_LED, OUTPUT);
@@ -318,13 +417,26 @@ void setup()
 #endif
 
   bool loaded = settingsLoad();
-  Serial.printf("[CFG] %s\n", loaded ? "loaded" : "defaults");
+  Log.printf("[CFG] %s\n", loaded ? "loaded" : "defaults");
   queue.begin();
 
-  if (sys.begin(true, true)) {
-    Serial.printf("[SYS] co-processor type %u\n", sys.devType);
+  // The co-processor keeps running when only the ESP32 restarts (USB flashing,
+  // OTA, settings) and may still be in low power mode from a previous standby.
+  // If it does not answer, reset it and try again.
+  bool coproc = sys.begin(true, true);
+  for (int attempt = 1; !coproc && attempt <= 2; attempt++) {
+    Log.printf("[SYS] co-processor not answering, reset #%d\n", attempt);
+    pinMode(PIN_LINK_RESET, OUTPUT);
+    digitalWrite(PIN_LINK_RESET, LOW);
+    delay(100);
+    digitalWrite(PIN_LINK_RESET, HIGH);
+    delay(1500);
+    coproc = sys.begin(true, true);
+  }
+  if (coproc) {
+    Log.printf("[SYS] co-processor type %u\n", sys.devType);
   } else {
-    Serial.println("[SYS] no co-processor (OBD/CAN unavailable)");
+    Log.println("[SYS] no co-processor (OBD/CAN/voltage unavailable)");
   }
   liveLock();
   live.devType = sys.devType;
@@ -344,7 +456,7 @@ void setup()
 
   uplinkBegin(&sys);
   webBegin();
-  Serial.printf("[SYS] device id %s\n", deviceId());
+  Log.printf("[SYS] device id %s\n", deviceId());
 
   checkVoltage();
   state = PS_IDLE;
@@ -388,7 +500,18 @@ void loop()
   }
 
   // standby when parked long enough and nothing moves
-  if (!ignition && !moving && now - idleSince >= cfg.standbyDelay * 1000UL && now - lastMotion >= 30000) {
+  // never while somebody uses the web UI or a firmware update runs, and not within the first minutes after
+  // power-up so the device can be configured in a parked car
+  const char* blocker = standbyBlocker(now, moving);
+  static uint32_t lastBlockerLog = 0;
+  if (blocker && !ignition && now - lastBlockerLog >= 30000) {
+    lastBlockerLog = now;
+    Log.printf("[PWR] no standby: %s\n", blocker);
+  }
+  liveLock();
+  strlcpy(live.standbyBlocker, blocker ? blocker : "", sizeof(live.standbyBlocker));
+  liveUnlock();
+  if (!blocker) {
     standby();
     return;
   }

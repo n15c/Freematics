@@ -3,6 +3,12 @@ name: build
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a release (devices with auto update install it)"
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -19,6 +25,8 @@ jobs:
         env: [freematics_one_plus, freematics_one_plus_psram]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for the build number
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -26,7 +34,56 @@ jobs:
         run: pip install platformio
       - name: Build
         run: pio run -e ${{ matrix.env }}
+      - name: Collect
+        run: |
+          mkdir -p out
+          cp .pio/build/${{ matrix.env }}/firmware.bin out/firmware-${{ matrix.env }}.bin
       - uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ matrix.env }}
-          path: .pio/build/${{ matrix.env }}/firmware.bin
+          path: out/firmware-${{ matrix.env }}.bin
+
+  # Every push to master (or a manual run with "release") publishes a GitHub
+  # release. Devices fetch releases/latest/download/firmware-<env>.json.
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch' && inputs.release
+    needs: [test, firmware]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Manifests
+        id: info
+        run: |
+          BUILD=$(git rev-list --count HEAD)
+          COMMIT=$(git rev-parse --short HEAD)
+          EPOCH=$(git log -1 --format=%ct)
+          VERSION=$(grep -o 'FW_VERSION=\\"[^\\]*' platformio.ini | head -1 | sed 's/.*"//')
+          TAG="build-$BUILD"
+          for f in out/firmware-*.bin; do
+            ENV=$(basename "$f" .bin | sed 's/^firmware-//')
+            SHA=$(sha256sum "$f" | cut -d' ' -f1)
+            SIZE=$(stat -c %s "$f")
+            URL="https://github.com/${{ github.repository }}/releases/download/$TAG/firmware-$ENV.bin"
+            printf '{"build":%s,"version":"%s","commit":"%s","epoch":%s,"url":"%s","size":%s,"sha256":"%s"}\n' \
+              "$BUILD" "$VERSION" "$COMMIT" "$EPOCH" "$URL" "$SIZE" "$SHA" > "out/firmware-$ENV.json"
+            cat "out/firmware-$ENV.json"
+          done
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=Firmware $VERSION build $BUILD ($COMMIT)" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.info.outputs.tag }}
+          name: ${{ steps.info.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          make_latest: "true"
+          files: |
+            out/firmware-*.bin
+            out/firmware-*.json

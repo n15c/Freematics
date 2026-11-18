@@ -20,6 +20,8 @@ public:
   void update(bool ignition);
   bool connected() { return m_ready; }
   bool obdConnected() { return m_ready && m_obdMode; }
+  // engine RPM > 0 reported within the last seconds
+  bool engineRunning() { return m_rpmTs && millis() - m_rpmTs < 8000 && m_rpm > 0; }
   // vehicle voltage (fast ADC on newer units, ATRV otherwise)
   float readVoltage();
   // co-processor low power mode / wake up
@@ -40,6 +42,8 @@ private:
   uint8_t queryProtocol();
   void readVinDtc();
   void pollPids();
+  void pollRpm();
+  bool checkObdErrors();
   void pollCanRequests();
   void sniffWindow();
   bool requestSignal(const CanSignalCfg& c, float& out);
@@ -60,6 +64,9 @@ private:
   uint32_t m_pidTs[MAX_OBD_PIDS];
   uint32_t m_pidRead[MAX_OBD_PIDS];
   uint8_t m_pidCursor = 0;
+  int m_rpm = 0;
+  uint32_t m_rpmTs = 0;
+  uint32_t m_rpmRead = 0;
 
   float m_canVal[MAX_CAN_SIGNALS];
   uint32_t m_canTs[MAX_CAN_SIGNALS];

@@ -41,9 +41,16 @@
 #define HTTP_TIMEOUT_MS 15000
 #define WIFI_CONNECT_TIMEOUT_MS 8000
 #define STANDBY_POLL_MS 200
+#define GNSS_KEEP_ON_MAX_MS (2 * 3600000UL)   // GNSS hot standby only for the first 2 h parked
+#define MODEM_SLEEP_MAX_MS (24 * 3600000UL)   // modem in flight mode for max 24 h, then off
+#define LOW_VOLTAGE_DELAY_MS 60000UL          // voltage must stay low this long
+#define CONFIG_WINDOW_MS 300000UL     // stay awake (AP on) for 5 min after plugging in
+#define WEB_ACTIVE_MS 180000UL        // web UI counts as in use for 3 min after the last request
 
 // ---------------------------------------------------------------------------
 // Hardware
 // ---------------------------------------------------------------------------
 #define WEB_PORT 80
+#define OTA_CHECK_INTERVAL_MS (6 * 3600000UL)
+#define OTA_DEFAULT_URL "https://github.com/n15c/Freematics/releases/latest/download/"
 #define MDNS_NAME "freematics"

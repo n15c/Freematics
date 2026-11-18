@@ -1,3 +1,4 @@
+#include "log.h"
 #include "queue.h"
 #include <LittleFS.h>
 #include <stddef.h>
@@ -43,7 +44,7 @@ bool RecordQueue::begin()
       }
     }
   }
-  Serial.printf("[QUEUE] RAM slots:%u, file:%u bytes pending\n", m_cap, m_fileSize - m_fileRead);
+  Log.printf("[QUEUE] RAM slots:%u, file:%u bytes pending\n", m_cap, m_fileSize - m_fileRead);
   return m_ring != nullptr;
 }
 

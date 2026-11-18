@@ -54,6 +54,29 @@ pio device monitor
 
 Spätere Updates gehen über das Web UI (*System → Firmware-Update*) mit `.pio/build/<env>/firmware.bin`.
 
+Jeder Build trägt eine **Build-Nummer**: die Anzahl der Git-Commits, dazu der Commit-Hash und die Build-Zeit. Ein `+` hinter dem Hash bedeutet, dass nicht committete Änderungen enthalten sind. Die Nummer erscheint:
+
+- beim Kompilieren (`Firmware build 93 (4bb07fd)`)
+- in der seriellen Konsole beim Start, zusammen mit der aktiven Partition (`ota_0`/`ota_1`)
+- im Web UI in der Kopfzeile und unter *System*
+- in `/api/status`
+
+### Automatische Updates von GitHub
+
+Bei jedem Push auf `master` baut GitHub Actions die Firmware für beide Varianten und veröffentlicht ein Release `build-<N>` mit `firmware-<env>.bin` und `firmware-<env>.json` (Build, Commit, Grösse, SHA-256). Ein Release lässt sich auch manuell erzeugen: *Actions → build → Run workflow* mit „release“.
+
+Das Gerät lädt `<Update-Quelle>firmware-<env>.json`. Standard für die Update-Quelle ist `https://github.com/n15c/Freematics/releases/latest/download/`. Ist das Release neuer (Commit-Zeit), lädt das Gerät das Image, prüft die SHA-256-Prüfsumme und startet neu. Dabei gilt:
+
+- nur über WLAN, nie über Mobilfunk
+- automatisch nur bei ausgeschalteter Zündung: 2 min nach dem Start, danach alle 6 h
+- *System → Jetzt prüfen & installieren* startet die Prüfung sofort
+- während des Downloads kein Standby
+- abschaltbar unter *System → Automatisches Update*
+
+Das TLS-Zertifikat von GitHub wird auf dem Gerät nicht geprüft, es ist kein CA-Bundle eingebaut. Die Prüfsumme schützt vor defekten Downloads. Gegen jemanden, der im selben WLAN Manifest und Image austauscht, schützt sie nicht.
+
+Nach einem OTA-Update vergleicht das Web UI die Build-Nummer vor und nach dem Neustart. Ist sie unverändert, erscheint eine Warnung. Die aktive Partition wechselt bei jedem erfolgreichen Update.
+
 ## Einrichtung
 
 1. Gerät einstecken und Zündung einschalten.
@@ -63,7 +86,27 @@ Spätere Updates gehen über das Web UI (*System → Firmware-Update*) mit `.pio
 5. Unter **Netzwerk** Heim-WLAN, APN und SIM-PIN eintragen. Das Passwort des Access-Points und des Web UI sollte man ändern.
 6. Speichern. Das Gerät startet neu.
 
-Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurieren die Zündung einschalten.
+Wann das Gerät in den Standby geht, steuern diese Regeln:
+
+- Es geht frühestens nach der *Standby-Wartezeit* (Standard 120 s) nach Zündung aus und ohne Bewegung in den Standby.
+- Nach dem **Einstecken** bleibt es 5 Minuten wach, zum Konfigurieren im parkierten Auto. Ein Neustart aus der Software (OTA, Speichern) zählt nicht.
+- Solange das **Web UI offen** ist (Anfrage in den letzten 3 Minuten) oder ein Firmware-Update läuft, gibt es keinen Standby.
+- Ist das Heim-WLAN nicht erreichbar, sucht das Gerät nur 15 s danach. Danach versucht es alle 2 Minuten erneut, aber nur, wenn niemand mit dem Access-Point verbunden ist.
+- Bei Zündung aus fragt das Gerät nur noch alle 5 s die Drehzahl ab, damit der Fahrzeugbus einschlafen kann.
+
+Der **Log** ist im Web UI unter *Log* abrufbar: live mitlaufend und als Datei herunterladbar. Er liegt im RTC-Speicher (6 KB, die letzten etwa 100 Zeilen) und übersteht Neustarts, Abstürze und OTA-Updates, nicht aber das Ausstecken.
+
+Warum das Gerät gerade wach bleibt, steht im Web UI unter *Status → Fahrzeug → „Kein Standby weil“* und alle 30 s in der seriellen Konsole (`[PWR] no standby: …`).
+
+**Batterieschutz im Standby:**
+
+- WLAN und Web UI sind aus.
+- Der ESP32 geht in Light-Sleep, sobald nichts mehr läuft.
+- GNSS bleibt höchstens 2 h nach dem Abstellen warm.
+- Das Modem bleibt höchstens 24 h im Flugmodus und wird danach ganz ausgeschaltet.
+- Fällt die Bordspannung 1 Minute lang unter *Batterieschutz* (Standard 11,8 V), werden Modem und GNSS ausgeschaltet und keine Heartbeats mehr gesendet. Bei Spannung ≥ Schwelle + 0,3 V oder beim Motorstart läuft wieder alles normal.
+
+Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurieren die Zündung einschalten oder das Fahrzeug bewegen.
 
 ### Traccar
 
@@ -79,7 +122,7 @@ Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurier
 | `event` | `ignitionOn`, `ignitionOff`, `heartbeat`, `boot` |
 | `vin`, `dtcs` | Fahrgestellnummer und Fehlercodes (bei Zündung an) |
 | `deviceTemp` | Gerätetemperatur |
-| OBD/CAN | frei benannt, Standard: `obdSpeed`, `rpm`, `engineLoad`, `throttle`, `coolantTemp`, `intakeTemp`, `fuel`, `ambientTemp`, `obdOdometer` |
+| OBD/CAN | frei benannt, Standard: `obdSpeed`, `rpm`, `engineLoad`, `throttle`, `coolantTemp`, `intakeTemp`, `fuel`, `ambientTemp`, `obdOdometer` (in Metern; Traccar rechnet in km um) |
 
 ### Home Assistant
 
@@ -132,6 +175,7 @@ test/             Host-Unit-Tests: sh test/run_tests.sh
 | POST | `/api/restart`, `/api/reset`, `/api/queue/clear` | Wartung |
 | POST | `/api/can/monitor?seconds=30` | CAN-Monitor starten |
 | GET | `/api/can/frames` | gesehene CAN-Frames |
+| GET | `/api/log?from=<pos>` | Log als Text; Header `X-Log-Next` = Position für den nächsten Abruf |
 | POST | `/api/update` | Firmware-Upload (multipart) |
 
 ## Hinweise und Grenzen

@@ -42,6 +42,8 @@ struct Settings {
   uint16_t intervalIdle;    // s between points while ignition off but still awake
   uint16_t heartbeatMin;    // min between heartbeats while parked (0 = none)
   uint8_t headingChange;    // degrees: send extra point on course change (0 = off)
+  bool autoUpdate;          // install new firmware from updateUrl automatically (WiFi only)
+  char updateUrl[160];      // base URL of the release files
 
   // WiFi
   char wifiSsid[33];
@@ -78,6 +80,7 @@ struct Settings {
   float runVoltage;         // >= this voltage means engine/DC-DC is running
   float wakeDelta;          // voltage rise above parked level that wakes the device
   float motionG;            // motion threshold in g for wakeup
+  float lowVoltage;         // battery protection: below this (parked) everything non-essential is switched off
   uint16_t standbyDelay;    // s after ignition off before entering standby
 };
 

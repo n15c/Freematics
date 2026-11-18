@@ -1,3 +1,4 @@
+#include "log.h"
 #include "uplink.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -10,6 +11,8 @@
 #include "osmand.h"
 #include "modem.h"
 #include "gnss.h"
+#include "webui.h"
+#include "ota.h"
 
 enum CellState : uint8_t { CS_DISABLED = 0, CS_OFF, CS_SLEEP, CS_SEARCH, CS_ATTACH, CS_READY };
 
@@ -17,6 +20,8 @@ static FreematicsESP32* s_sys = nullptr;
 static Modem modem;
 static volatile bool s_standby = false;
 static volatile bool s_modemGnss = false;
+static volatile bool s_saver = false;
+static volatile bool s_idle = false;
 static char s_deviceId[32];
 
 static CellState s_cell = CS_OFF;
@@ -30,6 +35,15 @@ static bool s_wifiOn = false;
 static bool s_apOn = false;
 static bool s_mdns = false;
 static bool s_ntp = false;
+// station connection attempts: while the station searches for an access point
+// that is out of range (home WiFi while driving) the radio keeps hopping
+// channels and the own access point becomes unusable. So the station only
+// tries for a short time and then pauses.
+static bool s_staTrying = false;
+static uint32_t s_staTryStart = 0;
+static uint32_t s_staPauseSince = 0;
+static const uint32_t STA_TRY_MS = 15000;
+static const uint32_t STA_PAUSE_MS = 120000;
 
 static char s_query[RECORD_ATTR_LEN + 420];
 static char s_url[RECORD_ATTR_LEN + 600];
@@ -41,6 +55,8 @@ const char* deviceId()
 
 void uplinkSetStandby(bool standby) { s_standby = standby; }
 void uplinkUseModemGnss(bool on) { s_modemGnss = on; }
+void uplinkSetBatterySaver(bool on) { s_saver = on; }
+bool uplinkIdle() { return s_idle; }
 
 void systemRestart()
 {
@@ -65,18 +81,23 @@ static void wifiApply(bool awake, bool wantSta)
       WiFi.mode(WIFI_OFF);
       s_wifiOn = s_apOn = false;
       s_wifiUpSince = 0;
-      Serial.println("[WIFI] off");
+      Log.println("[WIFI] off");
     }
     return;
   }
   wifi_mode_t mode = sta && ap ? WIFI_AP_STA : sta ? WIFI_STA : WIFI_AP;
   if (!s_wifiOn || WiFi.getMode() != mode) {
     WiFi.mode(mode);
+    // same as the original firmware: limits current peaks (modem + WiFi on the
+    // OBD supply) which can otherwise cause brown-outs; plenty inside a car
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
     s_wifiOn = true;
     if (sta) {
       WiFi.setAutoReconnect(true);
       WiFi.begin(cfg.wifiSsid, cfg.wifiPass);
-      Serial.printf("[WIFI] joining %s\n", cfg.wifiSsid);
+      s_staTrying = true;
+      s_staTryStart = millis();
+      Log.printf("[WIFI] joining %s\n", cfg.wifiSsid);
     }
   }
   if (ap && !s_apOn) {
@@ -85,7 +106,7 @@ static void wifiApply(bool awake, bool wantSta)
     else snprintf(ssid, sizeof(ssid), "FREEMATICS-%s", deviceId() + strlen(deviceId()) - 4);
     WiFi.softAP(ssid, cfg.apPass[0] ? cfg.apPass : nullptr);
     s_apOn = true;
-    Serial.printf("[WIFI] AP %s at %s\n", ssid, WiFi.softAPIP().toString().c_str());
+    Log.printf("[WIFI] AP %s at %s\n", ssid, WiFi.softAPIP().toString().c_str());
     if (!s_mdns && MDNS.begin(MDNS_NAME)) {
       MDNS.addService("http", "tcp", WEB_PORT);
       s_mdns = true;
@@ -96,20 +117,63 @@ static void wifiApply(bool awake, bool wantSta)
   }
 }
 
+int uplinkApClients()
+{
+  return s_apOn ? WiFi.softAPgetStationNum() : 0;
+}
+
+// throttle station attempts while the access point is on (see above)
+static void staService(bool up)
+{
+  if (!cfg.wifiSsid[0] || !s_wifiOn || !(WiFi.getMode() & WIFI_MODE_STA)) return;
+  uint32_t now = millis();
+  if (up) {
+    s_staTrying = false;
+    return;
+  }
+  if (!s_apOn) {
+    // no access point (standby flush): nothing to disturb, keep trying
+    if (!s_staTrying) {
+      WiFi.setAutoReconnect(true);
+      WiFi.begin(cfg.wifiSsid, cfg.wifiPass);
+      s_staTrying = true;
+      s_staTryStart = now;
+    }
+    return;
+  }
+  if (s_staTrying && now - s_staTryStart > STA_TRY_MS) {
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect(false);
+    s_staTrying = false;
+    s_staPauseSince = now;
+    Log.printf("[WIFI] %s not reachable, pausing station\n", cfg.wifiSsid);
+  } else if (!s_staTrying && now - s_staPauseSince > STA_PAUSE_MS && uplinkApClients() == 0) {
+    // retry only when nobody uses the web UI
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(cfg.wifiSsid, cfg.wifiPass);
+    s_staTrying = true;
+    s_staTryStart = now;
+  }
+}
+
 static bool wifiStaUp()
 {
   if (!cfg.wifiSsid[0] || !s_wifiOn) return false;
   bool up = WiFi.status() == WL_CONNECTED;
+  staService(up);
   if (up && !s_wifiUpSince) {
     s_wifiUpSince = millis();
-    Serial.printf("[WIFI] connected, IP %s\n", WiFi.localIP().toString().c_str());
+    Log.printf("[WIFI] connected, IP %s\n", WiFi.localIP().toString().c_str());
     if (!s_ntp) {
       configTime(0, 0, "pool.ntp.org", "time.google.com");
       s_ntp = true;
     }
   } else if (!up && s_wifiUpSince) {
     s_wifiUpSince = 0;
-    Serial.println("[WIFI] disconnected");
+    // connection lost: auto reconnect searches now, limit it like a new attempt
+    s_staTrying = true;
+    s_staTryStart = millis();
+    Log.println("[WIFI] disconnected");
   }
   return up;
 }
@@ -167,13 +231,13 @@ static void cellService()
     if (s_lastPowerCycle == 0) s_lastPowerCycle = now;
     s_cell = CS_SEARCH;
     s_cellT0 = millis();
-    Serial.println("[CELL] searching network");
+    Log.println("[CELL] searching network");
     break;
   case CS_SLEEP:
     modem.setRadio(true);
     s_cell = CS_SEARCH;
     s_cellT0 = millis();
-    Serial.println("[CELL] radio on");
+    Log.println("[CELL] radio on");
     break;
   case CS_SEARCH: {
     static uint32_t lastPoll = 0;
@@ -185,7 +249,7 @@ static void cellService()
     live.roaming = modem.roaming();
     liveUnlock();
     if (reg) {
-      Serial.printf("[CELL] registered%s (%s) after %lus\n", modem.roaming() ? " ROAMING" : "",
+      Log.printf("[CELL] registered%s (%s) after %lus\n", modem.roaming() ? " ROAMING" : "",
                     modem.regInfo(), (unsigned long)(now - s_cellT0) / 1000);
       s_cell = CS_ATTACH;
       s_attachFails = 0;
@@ -207,7 +271,7 @@ static void cellService()
       strlcpy(live.netType, modem.netType(), sizeof(live.netType));
       live.rssi = rssi;
       liveUnlock();
-      Serial.printf("[CELL] online %s %s IP %s RSSI %d\n", modem.op(), modem.netType(), modem.ip(), rssi);
+      Log.printf("[CELL] online %s %s IP %s RSSI %d\n", modem.op(), modem.netType(), modem.ip(), rssi);
     } else if (++s_attachFails >= 3) {
       cellRecover("data connection failed (check APN)");
     } else {
@@ -223,15 +287,21 @@ static void cellService()
 static void cellSleep()
 {
   if (s_cell == CS_DISABLED || s_cell == CS_OFF) return;
-  if (cfg.modemStandby == MODEM_STANDBY_ONLINE) return;
-  if (s_modemGnss && cfg.modemStandby == MODEM_STANDBY_SLEEP && cfg.gnssKeepOn) {
+  if (s_saver) {
+    modem.powerOff();
+    s_cell = CS_OFF;
+    s_cellRetryAt = 0;
+    Log.println("[CELL] off (battery protection)");
+  } else if (cfg.modemStandby == MODEM_STANDBY_ONLINE) {
+    return;
+  } else if (s_modemGnss && cfg.modemStandby == MODEM_STANDBY_SLEEP && cfg.gnssKeepOn) {
     // keep the module on for GNSS, radio off
     modem.setRadio(false);
     s_cell = CS_SLEEP;
   } else if (cfg.modemStandby == MODEM_STANDBY_SLEEP) {
     modem.setRadio(false);
     s_cell = CS_SLEEP;
-    Serial.println("[CELL] radio off (standby)");
+    Log.println("[CELL] radio off (standby)");
   } else {
     modem.powerOff();
     s_cell = CS_OFF;
@@ -328,7 +398,7 @@ static void uplinkTask(void*)
       lastStandby = standby;
       standbySince = now;
       if (!standby) {
-        Serial.println("[NET] wake up");
+        Log.println("[NET] wake up");
         wifiApply(true, true);
       }
     }
@@ -342,7 +412,7 @@ static void uplinkTask(void*)
       if (gaveUpAt && qsize == gaveUpAt) pending = false;
       else if (!tryStart) tryStart = now;
       else if (now - tryStart > 300000UL) {
-        Serial.println("[NET] standby: no connectivity, giving up until next heartbeat");
+        Log.println("[NET] standby: no connectivity, giving up until next heartbeat");
         gaveUpAt = qsize;
         tryStart = 0;
         pending = false;
@@ -351,13 +421,24 @@ static void uplinkTask(void*)
       tryStart = 0;
       if (!standby) gaveUpAt = 0;
     }
-    if (standby && !pending) {
+    // an upload started over the station link (heartbeat in standby) must finish
+    if (standby && !pending && !webBusy()) {
       if (s_cell == CS_READY || s_cell == CS_SEARCH || s_cell == CS_ATTACH) cellSleep();
+      // long parked or battery low: switch the modem off completely
+      if (s_cell == CS_SLEEP && (s_saver || now - standbySince > MODEM_SLEEP_MAX_MS)) {
+        modem.powerOff();
+        s_cell = CS_OFF;
+        s_cellRetryAt = 0;
+        Log.println("[CELL] off (long standby)");
+      }
       wifiApply(false, false);
-      if (s_modemGnss) periodic(LINK_NONE);
+      bool gnssPoll = s_modemGnss && !s_saver && s_cell != CS_OFF;
+      if (gnssPoll) periodic(LINK_NONE);
+      s_idle = !s_wifiOn && !gnssPoll;
       delay(STANDBY_POLL_MS);
       continue;
     }
+    s_idle = false;
     if (standby) wifiApply(false, true); // station only, for heartbeats / flushing
 
     bool wifiUp = wifiStaUp();
@@ -390,6 +471,14 @@ static void uplinkTask(void*)
 
     periodic(link);
 
+    // firmware updates: only over WiFi, automatically only with ignition off
+    {
+      liveLock();
+      bool ign = live.ignition;
+      liveUnlock();
+      otaService(link == LINK_WIFI, ign, standby);
+    }
+
     if (link == LINK_NONE || !pending || (int32_t)(now - backoffUntil) < 0) {
       delay(100);
       continue;
@@ -412,12 +501,12 @@ static void uplinkTask(void*)
       live.lastUploadMs = millis();
       live.lastError[0] = 0;
       liveUnlock();
-      Serial.printf("[NET] sent via %s (%d), queue %u\n", link == LINK_WIFI ? "WiFi" : "cell", code, queue.size());
+      Log.printf("[NET] sent via %s (%d), queue %u\n", link == LINK_WIFI ? "WiFi" : "cell", code, queue.size());
       // newest point also to the optional live target (e.g. Home Assistant webhook)
       if (cfg.liveUrl[0] && queue.size() == 0) {
         int c2;
         if (!sendRecord(rec, link, cfg.liveUrl, c2) || c2 < 200 || c2 >= 300) {
-          Serial.printf("[NET] live target failed (%d)\n", c2);
+          Log.printf("[NET] live target failed (%d)\n", c2);
         }
       }
     } else if (ok && code >= 400 && code < 500 && code != 408 && code != 429) {
