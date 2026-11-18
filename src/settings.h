@@ -69,6 +69,7 @@ struct Settings {
 
   // vehicle
   bool obdEnabled;
+  bool speedFromObd;        // report the speed from OBD (PID 0D) instead of GNSS when available
   uint8_t obdProtocol;      // 0 = auto, else ELM protocol number
   uint8_t pidCount;
   ObdPidCfg pids[MAX_OBD_PIDS];

@@ -84,6 +84,7 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
 <section id="t-vehicle" class="hide">
  <div class="card"><h2>OBD-II</h2>
   <label class="chk"><input type="checkbox" id="obdEnabled">OBD-II abfragen</label>
+  <label class="chk"><input type="checkbox" id="speedFromObd">Geschwindigkeit aus OBD senden statt GPS (PID 0D muss in der Liste sein; GPS-Wert als gpsSpeed)</label>
   <div class="row"><div><label>Protokoll</label><select id="obdProtocol"><option value="0">Automatisch (letztes merken)</option><option value="6">CAN 11bit 500k</option><option value="8">CAN 29bit 250k</option><option value="7">CAN 29bit 500k</option><option value="9">CAN 11bit 250k</option><option value="3">ISO 9141-2</option><option value="4">KWP2000 5baud</option><option value="5">KWP2000 fast</option></select></div></div>
   <div class="tbl"><table><thead><tr><th>PID (hex)</th><th>Attribut</th><th>Intervall s</th><th></th></tr></thead><tbody id="pids"></tbody></table></div>
   <div class="bar"><button class="btn sec" onclick="addPid()">+ PID</button></div>
@@ -141,7 +142,7 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
 </main><div id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);let C={},S={};
-const fields=['serverUrl','liveUrl','deviceId','httpMethod','intervalDriving','intervalIdle','heartbeatMin','headingChange','wifiSsid','wifiPass','apSsid','apPass','apMode','webPass','cellEnabled','apn','apnUser','apnPass','simPin','netMode','modemStandby','obdEnabled','obdProtocol','canEnabled','canProtocol','autoUpdate','updateUrl','runVoltage','wakeDelta','motionG','standbyDelay','lowVoltage','gnssKeepOn','gnssKeepMin','gnssUseModem'];
+const fields=['serverUrl','liveUrl','deviceId','httpMethod','intervalDriving','intervalIdle','heartbeatMin','headingChange','wifiSsid','wifiPass','apSsid','apPass','apMode','webPass','cellEnabled','apn','apnUser','apnPass','simPin','netMode','modemStandby','obdEnabled','speedFromObd','obdProtocol','canEnabled','canProtocol','autoUpdate','updateUrl','runVoltage','wakeDelta','motionG','standbyDelay','lowVoltage','gnssKeepOn','gnssKeepMin','gnssUseModem'];
 function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';clearTimeout(e._t);e._t=setTimeout(()=>e.style.display='none',3000)}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x==b));document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hide',s.id!='t-'+b.dataset.t))});
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));

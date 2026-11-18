@@ -116,6 +116,8 @@ Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurier
 
 | Attribut | Bedeutung |
 |---|---|
+| `speed` | Geschwindigkeit: aus OBD (PID 0D), falls verfügbar, sonst GPS; abschaltbar unter *Fahrzeug* |
+| `gpsSpeed` | GPS-Geschwindigkeit in km/h zum Vergleich, wenn `speed` aus OBD kommt |
 | `ignition`, `motion` | Zündung, Bewegung (Traccar nutzt sie für Fahrten und Motorstunden) |
 | `power` | Bordspannung in V |
 | `rssi`, `sat`, `hdop` | Signal, Satelliten, Genauigkeit |

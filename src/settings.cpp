@@ -37,6 +37,7 @@ void settingsDefaults(Settings& s)
   s.gnssUseModem = true;
 
   s.obdEnabled = true;
+  s.speedFromObd = true;
   s.obdProtocol = 0;
   // attribute names follow Traccar's standard position keys where one exists
   setPid(s.pids[s.pidCount++], 0x0D, 0, "obdSpeed");
@@ -100,6 +101,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool hide)
   o["gnssUseModem"] = s.gnssUseModem;
 
   o["obdEnabled"] = s.obdEnabled;
+  o["speedFromObd"] = s.speedFromObd;
   o["obdProtocol"] = s.obdProtocol;
   JsonArray pids = o["pids"].to<JsonArray>();
   for (int i = 0; i < s.pidCount; i++) {
@@ -187,6 +189,7 @@ void settingsFromJson(Settings& s, JsonObjectConst o)
   getNum(o, "gnssUseModem", s.gnssUseModem);
 
   getNum(o, "obdEnabled", s.obdEnabled);
+  getNum(o, "speedFromObd", s.speedFromObd);
   getNum(o, "obdProtocol", s.obdProtocol);
   JsonArrayConst pids = o["pids"];
   if (!pids.isNull()) {

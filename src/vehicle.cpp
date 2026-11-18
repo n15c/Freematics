@@ -62,6 +62,19 @@ void Vehicle::sleep()
   liveUnlock();
 }
 
+bool Vehicle::obdSpeed(float& kmh, uint32_t maxAge)
+{
+  if (!obdConnected()) return false;
+  uint32_t now = millis();
+  for (int i = 0; i < cfg.pidCount; i++) {
+    if (cfg.pids[i].pid == 0x0D && m_pidTs[i] && now - m_pidTs[i] <= maxAge) {
+      kmh = m_pidVal[i];
+      return true;
+    }
+  }
+  return false;
+}
+
 void Vehicle::idle()
 {
   if (!m_obd.link) return;

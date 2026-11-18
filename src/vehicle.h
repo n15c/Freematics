@@ -37,6 +37,8 @@ public:
   void monitorJson(JsonArray arr);
   // last values (for live view); NAN if unknown
   float pidValue(int i) { return m_pidVal[i]; }
+  // vehicle speed from OBD PID 0D if read within maxAge ms
+  bool obdSpeed(float& kmh, uint32_t maxAge);
   float canValue(int i) { return m_canVal[i]; }
 private:
   bool initLink(bool allowAuto);

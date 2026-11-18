@@ -126,12 +126,21 @@ static void pushRecord(uint8_t event, const char* extra = nullptr)
     r.hdop = f.hdop;
     r.speed = r.valid ? f.speed : 0;
   }
+  // speed from the vehicle (more accurate, also without GNSS fix); the GNSS
+  // speed stays available as attribute gpsSpeed for comparison
+  float obdKmh;
+  bool speedObd = cfg.speedFromObd && vehicle.obdSpeed(obdKmh, 3000);
+  if (speedObd) r.speed = obdKmh;
   r.ts = (r.valid && f.utc) ? f.utc : (clockValid() ? (uint32_t)time(nullptr) : 0);
   r.ignition = ignition;
   r.motion = (lastMotion && millis() - lastMotion < 10000) || r.speed > 5;
   r.power = voltage;
   r.event = event;
   if (extra) strlcpy(r.attrs, extra, sizeof(r.attrs));
+  if (speedObd && r.valid) {
+    size_t l = strlen(r.attrs);
+    snprintf(r.attrs + l, sizeof(r.attrs) - l, "&gpsSpeed=%.1f", f.speed);
+  }
   liveLock();
   r.rssi = (int8_t)constrain(live.rssi, -127, 0);
   char vin[18];
