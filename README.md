@@ -108,7 +108,7 @@ Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurier
 | `event` | `ignitionOn`, `ignitionOff`, `heartbeat`, `boot` |
 | `vin`, `dtcs` | Fahrgestellnummer und Fehlercodes (bei Zündung an) |
 | `deviceTemp` | Gerätetemperatur |
-| OBD/CAN | frei benannt, Standard: `obdSpeed`, `rpm`, `engineLoad`, `throttle`, `coolantTemp`, `intakeTemp`, `fuel`, `ambientTemp`, `obdOdometer` |
+| OBD/CAN | frei benannt, Standard: `obdSpeed`, `rpm`, `engineLoad`, `throttle`, `coolantTemp`, `intakeTemp`, `fuel`, `ambientTemp`, `obdOdometer` (in Metern; Traccar rechnet in km um) |
 
 ### Home Assistant
 

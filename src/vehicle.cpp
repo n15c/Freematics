@@ -10,7 +10,8 @@ Vehicle vehicle;
 static float pidScale(uint8_t pid)
 {
   switch (pid) {
-  case 0xA6: return 0.1f;   // odometer, 0.1 km
+  // odometer: ECU reports 0.1 km, Traccar's obdOdometer is in meters
+  case 0xA6: return 100.0f;
   default: return 1.0f;
   }
 }
