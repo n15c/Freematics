@@ -1,3 +1,4 @@
+#include "log.h"
 #include "gnss.h"
 #include "config.h"
 #include "util.h"
@@ -19,13 +20,13 @@ bool Gnss::begin(FreematicsESP32* sys)
   if (!m_mutex) m_mutex = xSemaphoreCreateMutex();
   m_standalone = false;
   if (sys->gpsBeginExt()) {
-    Serial.println("[GNSS] external receiver");
+    Log.println("[GNSS] external receiver");
     m_standalone = true;
   } else if (sys->gpsBegin()) {
-    Serial.println("[GNSS] internal receiver");
+    Log.println("[GNSS] internal receiver");
     m_standalone = true;
   } else {
-    Serial.println("[GNSS] no standalone receiver");
+    Log.println("[GNSS] no standalone receiver");
   }
   m_lastData = millis();
   return m_standalone;
@@ -77,7 +78,7 @@ bool Gnss::accept(const GPS_DATA& gd, uint32_t now)
       m_candLon = lon;
       m_candMs = now;
       if (m_candCount >= REANCHOR_FIXES) {
-        Serial.println("[GNSS] re-anchoring position");
+        Log.println("[GNSS] re-anchoring position");
         ok = true;
       }
     }
@@ -125,7 +126,7 @@ bool Gnss::update()
         return accept(*gd, now);
       }
     } else if (now - m_lastData > GNSS_REINIT_MS) {
-      Serial.println("[GNSS] no data, restarting receiver");
+      Log.println("[GNSS] no data, restarting receiver");
       m_sys->gpsEnd(true);
       delay(50);
       begin(m_sys);

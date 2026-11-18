@@ -80,6 +80,8 @@ Wann das Gerät in den Standby geht, steuern diese Regeln:
 - Ist das Heim-WLAN nicht erreichbar, sucht das Gerät nur 15 s danach. Danach versucht es alle 2 Minuten erneut, aber nur, wenn niemand mit dem Access-Point verbunden ist.
 - Bei Zündung aus fragt das Gerät nur noch alle 5 s die Drehzahl ab, damit der Fahrzeugbus einschlafen kann.
 
+Der **Log** ist im Web UI unter *Log* abrufbar: live mitlaufend und als Datei herunterladbar. Er liegt im RTC-Speicher (6 KB, die letzten etwa 100 Zeilen) und übersteht Neustarts, Abstürze und OTA-Updates, nicht aber das Ausstecken.
+
 Warum das Gerät gerade wach bleibt, steht im Web UI unter *Status → Fahrzeug → „Kein Standby weil“* und alle 30 s in der seriellen Konsole (`[PWR] no standby: …`).
 
 **Batterieschutz im Standby:**
@@ -159,6 +161,7 @@ test/             Host-Unit-Tests: sh test/run_tests.sh
 | POST | `/api/restart`, `/api/reset`, `/api/queue/clear` | Wartung |
 | POST | `/api/can/monitor?seconds=30` | CAN-Monitor starten |
 | GET | `/api/can/frames` | gesehene CAN-Frames |
+| GET | `/api/log?from=<pos>` | Log als Text; Header `X-Log-Next` = Position für den nächsten Abruf |
 | POST | `/api/update` | Firmware-Upload (multipart) |
 
 ## Hinweise und Grenzen

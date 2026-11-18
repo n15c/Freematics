@@ -1,3 +1,4 @@
+#include "log.h"
 #include "webui.h"
 #include <WiFi.h>
 #include <WebServer.h>
@@ -204,6 +205,22 @@ static void handleQueueClear()
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
+// /api/log?from=<pos>: log text from that position (incremental reads);
+// header X-Log-Next = position to pass next time
+static void handleLog()
+{
+  if (!auth()) return;
+  uint32_t from = server.hasArg("from") ? strtoul(server.arg("from").c_str(), nullptr, 10) : 0;
+  static char buf[6200];
+  uint32_t next;
+  size_t n = logRead(from, buf, sizeof(buf) - 1, next);
+  buf[n] = 0;
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("X-Log-Next", String(next));
+  server.sendHeader("Access-Control-Expose-Headers", "X-Log-Next");
+  server.send(200, "text/plain; charset=utf-8", buf);
+}
+
 static void handleCanMonitor()
 {
   if (!auth()) return;
@@ -236,7 +253,7 @@ static void handleUpdateDone()
 
 static void otaError()
 {
-  Update.printError(Serial);
+  Update.printError(Log);
   if (!s_otaErr[0]) strlcpy(s_otaErr, Update.errorString(), sizeof(s_otaErr));
 }
 
@@ -245,7 +262,7 @@ static void handleUpdateUpload()
   if (cfg.webPass[0] && !server.authenticate("admin", cfg.webPass)) return;
   HTTPUpload& up = server.upload();
   if (up.status == UPLOAD_FILE_START) {
-    Serial.printf("[OTA] %s\n", up.filename.c_str());
+    Log.printf("[OTA] %s\n", up.filename.c_str());
     s_otaOk = false;
     s_otaErr[0] = 0;
     s_otaActivity = millis() | 1;
@@ -256,7 +273,7 @@ static void handleUpdateUpload()
   } else if (up.status == UPLOAD_FILE_END) {
     s_otaOk = Update.end(true);
     if (!s_otaOk) otaError();
-    else Serial.printf("[OTA] done, %u bytes\n", up.totalSize);
+    else Log.printf("[OTA] done, %u bytes\n", up.totalSize);
     s_otaActivity = 0;  // on success the restart keeps webBusy() true
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     Update.abort();
@@ -285,6 +302,7 @@ void webBegin()
   server.on("/api/reset", HTTP_POST, handleReset);
   server.on("/api/restart", HTTP_POST, handleRestart);
   server.on("/api/queue/clear", HTTP_POST, handleQueueClear);
+  server.on("/api/log", HTTP_GET, handleLog);
   server.on("/api/can/monitor", HTTP_POST, handleCanMonitor);
   server.on("/api/can/frames", HTTP_GET, handleCanFrames);
   server.on("/api/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);

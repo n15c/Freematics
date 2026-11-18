@@ -1,3 +1,4 @@
+#include "log.h"
 #include "uplink.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -79,7 +80,7 @@ static void wifiApply(bool awake, bool wantSta)
       WiFi.mode(WIFI_OFF);
       s_wifiOn = s_apOn = false;
       s_wifiUpSince = 0;
-      Serial.println("[WIFI] off");
+      Log.println("[WIFI] off");
     }
     return;
   }
@@ -95,7 +96,7 @@ static void wifiApply(bool awake, bool wantSta)
       WiFi.begin(cfg.wifiSsid, cfg.wifiPass);
       s_staTrying = true;
       s_staTryStart = millis();
-      Serial.printf("[WIFI] joining %s\n", cfg.wifiSsid);
+      Log.printf("[WIFI] joining %s\n", cfg.wifiSsid);
     }
   }
   if (ap && !s_apOn) {
@@ -104,7 +105,7 @@ static void wifiApply(bool awake, bool wantSta)
     else snprintf(ssid, sizeof(ssid), "FREEMATICS-%s", deviceId() + strlen(deviceId()) - 4);
     WiFi.softAP(ssid, cfg.apPass[0] ? cfg.apPass : nullptr);
     s_apOn = true;
-    Serial.printf("[WIFI] AP %s at %s\n", ssid, WiFi.softAPIP().toString().c_str());
+    Log.printf("[WIFI] AP %s at %s\n", ssid, WiFi.softAPIP().toString().c_str());
     if (!s_mdns && MDNS.begin(MDNS_NAME)) {
       MDNS.addService("http", "tcp", WEB_PORT);
       s_mdns = true;
@@ -144,7 +145,7 @@ static void staService(bool up)
     WiFi.disconnect(false);
     s_staTrying = false;
     s_staPauseSince = now;
-    Serial.printf("[WIFI] %s not reachable, pausing station\n", cfg.wifiSsid);
+    Log.printf("[WIFI] %s not reachable, pausing station\n", cfg.wifiSsid);
   } else if (!s_staTrying && now - s_staPauseSince > STA_PAUSE_MS && uplinkApClients() == 0) {
     // retry only when nobody uses the web UI
     WiFi.setAutoReconnect(true);
@@ -161,7 +162,7 @@ static bool wifiStaUp()
   staService(up);
   if (up && !s_wifiUpSince) {
     s_wifiUpSince = millis();
-    Serial.printf("[WIFI] connected, IP %s\n", WiFi.localIP().toString().c_str());
+    Log.printf("[WIFI] connected, IP %s\n", WiFi.localIP().toString().c_str());
     if (!s_ntp) {
       configTime(0, 0, "pool.ntp.org", "time.google.com");
       s_ntp = true;
@@ -171,7 +172,7 @@ static bool wifiStaUp()
     // connection lost: auto reconnect searches now, limit it like a new attempt
     s_staTrying = true;
     s_staTryStart = millis();
-    Serial.println("[WIFI] disconnected");
+    Log.println("[WIFI] disconnected");
   }
   return up;
 }
@@ -229,13 +230,13 @@ static void cellService()
     if (s_lastPowerCycle == 0) s_lastPowerCycle = now;
     s_cell = CS_SEARCH;
     s_cellT0 = millis();
-    Serial.println("[CELL] searching network");
+    Log.println("[CELL] searching network");
     break;
   case CS_SLEEP:
     modem.setRadio(true);
     s_cell = CS_SEARCH;
     s_cellT0 = millis();
-    Serial.println("[CELL] radio on");
+    Log.println("[CELL] radio on");
     break;
   case CS_SEARCH: {
     static uint32_t lastPoll = 0;
@@ -247,7 +248,7 @@ static void cellService()
     live.roaming = modem.roaming();
     liveUnlock();
     if (reg) {
-      Serial.printf("[CELL] registered%s (%s) after %lus\n", modem.roaming() ? " ROAMING" : "",
+      Log.printf("[CELL] registered%s (%s) after %lus\n", modem.roaming() ? " ROAMING" : "",
                     modem.regInfo(), (unsigned long)(now - s_cellT0) / 1000);
       s_cell = CS_ATTACH;
       s_attachFails = 0;
@@ -269,7 +270,7 @@ static void cellService()
       strlcpy(live.netType, modem.netType(), sizeof(live.netType));
       live.rssi = rssi;
       liveUnlock();
-      Serial.printf("[CELL] online %s %s IP %s RSSI %d\n", modem.op(), modem.netType(), modem.ip(), rssi);
+      Log.printf("[CELL] online %s %s IP %s RSSI %d\n", modem.op(), modem.netType(), modem.ip(), rssi);
     } else if (++s_attachFails >= 3) {
       cellRecover("data connection failed (check APN)");
     } else {
@@ -289,7 +290,7 @@ static void cellSleep()
     modem.powerOff();
     s_cell = CS_OFF;
     s_cellRetryAt = 0;
-    Serial.println("[CELL] off (battery protection)");
+    Log.println("[CELL] off (battery protection)");
   } else if (cfg.modemStandby == MODEM_STANDBY_ONLINE) {
     return;
   } else if (s_modemGnss && cfg.modemStandby == MODEM_STANDBY_SLEEP && cfg.gnssKeepOn) {
@@ -299,7 +300,7 @@ static void cellSleep()
   } else if (cfg.modemStandby == MODEM_STANDBY_SLEEP) {
     modem.setRadio(false);
     s_cell = CS_SLEEP;
-    Serial.println("[CELL] radio off (standby)");
+    Log.println("[CELL] radio off (standby)");
   } else {
     modem.powerOff();
     s_cell = CS_OFF;
@@ -396,7 +397,7 @@ static void uplinkTask(void*)
       lastStandby = standby;
       standbySince = now;
       if (!standby) {
-        Serial.println("[NET] wake up");
+        Log.println("[NET] wake up");
         wifiApply(true, true);
       }
     }
@@ -410,7 +411,7 @@ static void uplinkTask(void*)
       if (gaveUpAt && qsize == gaveUpAt) pending = false;
       else if (!tryStart) tryStart = now;
       else if (now - tryStart > 300000UL) {
-        Serial.println("[NET] standby: no connectivity, giving up until next heartbeat");
+        Log.println("[NET] standby: no connectivity, giving up until next heartbeat");
         gaveUpAt = qsize;
         tryStart = 0;
         pending = false;
@@ -427,7 +428,7 @@ static void uplinkTask(void*)
         modem.powerOff();
         s_cell = CS_OFF;
         s_cellRetryAt = 0;
-        Serial.println("[CELL] off (long standby)");
+        Log.println("[CELL] off (long standby)");
       }
       wifiApply(false, false);
       bool gnssPoll = s_modemGnss && !s_saver && s_cell != CS_OFF;
@@ -491,12 +492,12 @@ static void uplinkTask(void*)
       live.lastUploadMs = millis();
       live.lastError[0] = 0;
       liveUnlock();
-      Serial.printf("[NET] sent via %s (%d), queue %u\n", link == LINK_WIFI ? "WiFi" : "cell", code, queue.size());
+      Log.printf("[NET] sent via %s (%d), queue %u\n", link == LINK_WIFI ? "WiFi" : "cell", code, queue.size());
       // newest point also to the optional live target (e.g. Home Assistant webhook)
       if (cfg.liveUrl[0] && queue.size() == 0) {
         int c2;
         if (!sendRecord(rec, link, cfg.liveUrl, c2) || c2 < 200 || c2 >= 300) {
-          Serial.printf("[NET] live target failed (%d)\n", c2);
+          Log.printf("[NET] live target failed (%d)\n", c2);
         }
       }
     } else if (ok && code >= 400 && code < 500 && code != 408 && code != 429) {

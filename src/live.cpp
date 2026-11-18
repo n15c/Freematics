@@ -1,3 +1,4 @@
+#include "log.h"
 #include "live.h"
 #include <stdarg.h>
 
@@ -34,5 +35,5 @@ void liveSetError(const char* fmt, ...)
   liveLock();
   strlcpy(live.lastError, buf, sizeof(live.lastError));
   liveUnlock();
-  Serial.printf("[ERR] %s\n", buf);
+  Log.printf("[ERR] %s\n", buf);
 }

@@ -1,3 +1,4 @@
+#include "log.h"
 #include "vehicle.h"
 #include "live.h"
 #include "util.h"
@@ -100,7 +101,7 @@ bool Vehicle::initLink(bool allowAuto)
     uint8_t p = cfg.obdProtocol ? cfg.obdProtocol : nvsGetLastProtocol();
     if (p) {
       ok = m_obd.init((OBD_PROTOCOLS)p);
-      if (ok) Serial.printf("[OBD] connected with protocol %X\n", p);
+      if (ok) Log.printf("[OBD] connected with protocol %X\n", p);
     }
     if (!ok && !cfg.obdProtocol && allowAuto) {
       char buf[16];
@@ -112,14 +113,14 @@ bool Vehicle::initLink(bool allowAuto)
       m_proto = queryProtocol();
       if (!m_proto) m_proto = p;
       if (m_proto && !cfg.obdProtocol) nvsSetLastProtocol(m_proto);
-      Serial.printf("[OBD] ECU on, protocol %X\n", m_proto);
+      Log.printf("[OBD] ECU on, protocol %X\n", m_proto);
     }
   }
   if (!ok && cfg.canEnabled && cfg.canCount) {
     ok = rawInit(cfg.canProtocol);
     if (ok) {
       m_proto = cfg.canProtocol;
-      Serial.printf("[CAN] listening with protocol %X\n", m_proto);
+      Log.printf("[CAN] listening with protocol %X\n", m_proto);
     }
   }
   m_ext29 = isExt29(m_proto);
@@ -133,7 +134,7 @@ void Vehicle::readVinDtc()
     liveLock();
     strlcpy(live.vin, buf, sizeof(live.vin));
     liveUnlock();
-    Serial.printf("[OBD] VIN %s\n", buf);
+    Log.printf("[OBD] VIN %s\n", buf);
   }
   uint16_t dtc[6] = {0};
   int n = m_obd.readDTC(dtc, 6);
@@ -212,7 +213,7 @@ void Vehicle::pollPids()
 bool Vehicle::checkObdErrors()
 {
   if (m_obd.errors < 5) return false;
-  Serial.println("[OBD] ECU not responding");
+  Log.println("[OBD] ECU not responding");
   m_obd.errors = 0;
   m_ready = false;
   m_obdMode = false;

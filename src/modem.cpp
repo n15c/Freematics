@@ -1,8 +1,9 @@
+#include "log.h"
 #include "modem.h"
 #include <sys/time.h>
 #include "util.h"
 
-#define DBG(...) Serial.printf(__VA_ARGS__)
+#define DBG(...) Log.printf(__VA_ARGS__)
 
 // ---------------------------------------------------------------------------
 // low level

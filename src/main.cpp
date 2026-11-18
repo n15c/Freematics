@@ -12,6 +12,7 @@
  ******************************************************************************/
 #include <FreematicsPlus.h>
 #include <math.h>
+#include "log.h"
 #include "config.h"
 #include "settings.h"
 #include "live.h"
@@ -60,18 +61,18 @@ static void memsInit()
 {
   mems = new ICM_42627;
   if (mems->begin()) {
-    Serial.println("[MEMS] ICM-42627");
+    Log.println("[MEMS] ICM-42627");
     return;
   }
   delete mems;
   mems = new ICM_20948_I2C;
   if (mems->begin()) {
-    Serial.println("[MEMS] ICM-20948");
+    Log.println("[MEMS] ICM-20948");
     return;
   }
   delete mems;
   mems = nullptr;
-  Serial.println("[MEMS] none");
+  Log.println("[MEMS] none");
 }
 
 static void memsCalibrate()
@@ -223,7 +224,7 @@ static void updateIgnition()
         ignition = true;
         ignitionCandidateSince = 0;
         state = PS_DRIVING;
-        Serial.printf("[PWR] ignition ON (%.2f V)\n", voltage);
+        Log.printf("[PWR] ignition ON (%.2f V)\n", voltage);
         pushRecord(EV_IGNITION_ON);
       }
     }
@@ -237,7 +238,7 @@ static void updateIgnition()
         ignitionOffSince = 0;
         state = PS_IDLE;
         idleSince = now;
-        Serial.printf("[PWR] ignition OFF (%.2f V)\n", voltage);
+        Log.printf("[PWR] ignition OFF (%.2f V)\n", voltage);
         pushRecord(EV_IGNITION_OFF);
       }
     }
@@ -270,7 +271,7 @@ static const char* standbyBlocker(uint32_t now, bool moving)
 }
 static void standby()
 {
-  Serial.println("[PWR] entering standby");
+  Log.println("[PWR] entering standby");
   state = PS_STANDBY;
   publishLive();
   uplinkSetStandby(true);
@@ -343,7 +344,7 @@ static void standby()
           if (!lowSince) lowSince = now;
           if (now - lowSince >= LOW_VOLTAGE_DELAY_MS) {
             saver = true;
-            Serial.printf("[PWR] battery low (%.2f V): protection on\n", voltage);
+            Log.printf("[PWR] battery low (%.2f V): protection on\n", voltage);
             uplinkSetBatterySaver(true);
             if (gnss.standalone()) gnss.end();
           }
@@ -351,7 +352,7 @@ static void standby()
           lowSince = 0;
           if (saver && voltage >= cfg.lowVoltage + 0.3f) {
             saver = false;
-            Serial.printf("[PWR] battery recovered (%.2f V)\n", voltage);
+            Log.printf("[PWR] battery recovered (%.2f V)\n", voltage);
             uplinkSetBatterySaver(false);
           }
         }
@@ -359,7 +360,7 @@ static void standby()
     }
     // GNSS hot standby only for short stops
     if (gnss.standalone() && now - standbyStart > GNSS_KEEP_ON_MAX_MS) {
-      Serial.println("[GNSS] off (long standby)");
+      Log.println("[GNSS] off (long standby)");
       gnss.end();
     }
 
@@ -367,14 +368,14 @@ static void standby()
     gnss.update(); // standalone receiver or modem GNSS fed by the uplink task
     if (!saver && cfg.heartbeatMin && now - lastHeartbeat >= cfg.heartbeatMin * 60000UL) {
       lastHeartbeat = now;
-      Serial.println("[PWR] heartbeat");
+      Log.println("[PWR] heartbeat");
       pushRecord(EV_HEARTBEAT);
     }
     static uint32_t lastPub = 0;
     if (now - lastPub > 2000) { lastPub = now; publishLive(); }
   }
 
-  Serial.printf("[PWR] wake up (%s, %.2f V)\n", reason, voltage);
+  Log.printf("[PWR] wake up (%s, %.2f V)\n", reason, voltage);
   uplinkSetBatterySaver(false);
   uplinkSetStandby(false);
   vehicle.wake();
@@ -400,12 +401,13 @@ void setup()
   // give the co-processor time to boot when everything powers up together
   delay(500);
   Serial.begin(115200);
+  logBegin();
   liveMutex = xSemaphoreCreateMutex();
   memset(&live, 0, sizeof(live));
   live.bootMs = millis();
   const esp_partition_t* part = esp_ota_get_running_partition();
-  Serial.printf("\nFreematics Telelogger %s\n", fwVersionString());
-  Serial.printf("[SYS] running from %s, reset reason %d\n", part ? part->label : "?", (int)esp_reset_reason());
+  Log.printf("\nFreematics Telelogger %s\n", fwVersionString());
+  Log.printf("[SYS] running from %s, reset reason %d\n", part ? part->label : "?", (int)esp_reset_reason());
   powerOnBoot = esp_reset_reason() == ESP_RST_POWERON || esp_reset_reason() == ESP_RST_BROWNOUT;
 
 #ifdef PIN_LED
@@ -414,7 +416,7 @@ void setup()
 #endif
 
   bool loaded = settingsLoad();
-  Serial.printf("[CFG] %s\n", loaded ? "loaded" : "defaults");
+  Log.printf("[CFG] %s\n", loaded ? "loaded" : "defaults");
   queue.begin();
 
   // The co-processor keeps running when only the ESP32 restarts (USB flashing,
@@ -422,7 +424,7 @@ void setup()
   // If it does not answer, reset it and try again.
   bool coproc = sys.begin(true, true);
   for (int attempt = 1; !coproc && attempt <= 2; attempt++) {
-    Serial.printf("[SYS] co-processor not answering, reset #%d\n", attempt);
+    Log.printf("[SYS] co-processor not answering, reset #%d\n", attempt);
     pinMode(PIN_LINK_RESET, OUTPUT);
     digitalWrite(PIN_LINK_RESET, LOW);
     delay(100);
@@ -431,9 +433,9 @@ void setup()
     coproc = sys.begin(true, true);
   }
   if (coproc) {
-    Serial.printf("[SYS] co-processor type %u\n", sys.devType);
+    Log.printf("[SYS] co-processor type %u\n", sys.devType);
   } else {
-    Serial.println("[SYS] no co-processor (OBD/CAN/voltage unavailable)");
+    Log.println("[SYS] no co-processor (OBD/CAN/voltage unavailable)");
   }
   liveLock();
   live.devType = sys.devType;
@@ -453,7 +455,7 @@ void setup()
 
   uplinkBegin(&sys);
   webBegin();
-  Serial.printf("[SYS] device id %s\n", deviceId());
+  Log.printf("[SYS] device id %s\n", deviceId());
 
   checkVoltage();
   state = PS_IDLE;
@@ -503,7 +505,7 @@ void loop()
   static uint32_t lastBlockerLog = 0;
   if (blocker && !ignition && now - lastBlockerLog >= 30000) {
     lastBlockerLog = now;
-    Serial.printf("[PWR] no standby: %s\n", blocker);
+    Log.printf("[PWR] no standby: %s\n", blocker);
   }
   liveLock();
   strlcpy(live.standbyBlocker, blocker ? blocker : "", sizeof(live.standbyBlocker));

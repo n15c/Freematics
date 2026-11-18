@@ -34,7 +34,7 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
 .hide{display:none}
 </style></head><body>
 <header><h1>Freematics Telelogger <small id="ver" style="font-weight:400;color:var(--mut)"></small></h1><span id="hdr" class="pill">…</span></header>
-<nav id="nav"><button data-t="status" class="on">Status</button><button data-t="server">Server</button><button data-t="net">Netzwerk</button><button data-t="vehicle">Fahrzeug</button><button data-t="can">CAN</button><button data-t="power">Energie</button><button data-t="system">System</button></nav>
+<nav id="nav"><button data-t="status" class="on">Status</button><button data-t="server">Server</button><button data-t="net">Netzwerk</button><button data-t="vehicle">Fahrzeug</button><button data-t="can">CAN</button><button data-t="power">Energie</button><button data-t="log">Log</button><button data-t="system">System</button></nav>
 <main>
 <section id="t-status">
  <div class="grid">
@@ -119,6 +119,11 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
  <div class="bar"><button class="btn" onclick="save()">Speichern &amp; neu starten</button></div>
 </section>
 
+<section id="t-log" class="hide"><div class="card"><h2>Log</h2>
+ <div class="bar" style="margin-top:0;align-items:center"><label class="chk" style="margin:0"><input type="checkbox" id="logAuto" checked>Live</label><label class="chk" style="margin:0"><input type="checkbox" id="logScroll" checked>Mitscrollen</label>
+ <button class="btn sec" onclick="logLoad(true)">Neu laden</button><button class="btn sec" onclick="logSave()">Herunterladen</button></div>
+ <p class="hint">Zeiten in UTC (bzw. +Sekunden seit Start, solange die Uhrzeit unbekannt ist). Der Log überlebt Neustarts und Updates, nicht aber das Ausstecken.</p>
+ <pre id="logBox" style="height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;margin:10px 0 0"></pre></div></section>
 <section id="t-system" class="hide">
  <div class="card"><h2>Firmware-Update</h2><p class="hint">Installiert: <b id="fwcur">…</b></p><input type="file" id="fw" accept=".bin"><div class="bar"><button class="btn" onclick="ota()">Hochladen</button><span id="otap"></span></div></div>
  <div class="card"><h2>Wartung</h2><div class="bar">
@@ -165,5 +170,10 @@ function otaCheck(){let p;try{p=JSON.parse(sessionStorage.getItem('ota')||'null'
 function ota(){const f=$('fw').files[0];if(!f)return;const fd=new FormData();fd.append('fw',f);const x=new XMLHttpRequest();x.upload.onprogress=e=>$('otap').textContent=Math.round(e.loaded*100/e.total)+' %';x.onload=()=>{let r={};try{r=JSON.parse(x.responseText)}catch(e){}if(x.status==200){try{sessionStorage.setItem('ota',JSON.stringify({build:S.build,commit:S.commit,t:Date.now()}))}catch(e){}toast('Update übertragen – Neustart…');setTimeout(()=>location.reload(),12000)}else alert('Update fehlgeschlagen: '+(r.error||('HTTP '+x.status)))};x.open('POST','/api/update');x.send(fd)}
 function exp(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(collect(),null,1)],{type:'application/json'}));a.download='telelogger-config.json';a.click()}
 async function impc(){const f=$('imp').files[0];if(!f)return;const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:await f.text()});toast(r.ok?'Importiert – Neustart…':'Import fehlgeschlagen')}
+let logPos=0,logBusy=false;
+async function logLoad(reset){if(logBusy)return;logBusy=true;try{if(reset){logPos=0;$('logBox').textContent=''}const r=await fetch('/api/log?from='+logPos);const t=await r.text();const nx=+r.headers.get('X-Log-Next');if(nx<logPos)$('logBox').textContent='';logPos=nx||logPos;if(t){const b=$('logBox');b.textContent=(b.textContent+t).slice(-200000);if($('logScroll').checked)b.scrollTop=b.scrollHeight}}catch(e){}logBusy=false}
+function logSave(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([$('logBox').textContent],{type:'text/plain'}));a.download='telelogger-'+(S.id||'log')+'-'+new Date().toISOString().slice(0,19).replace(/:/g,'')+'.txt';a.click()}
+setInterval(()=>{if(!$('t-log').classList.contains('hide')&&$('logAuto').checked)logLoad(false)},2000);
+document.querySelector('nav button[data-t=log]').addEventListener('click',()=>logLoad(false));
 load();status();setInterval(status,2000);
 </script></body></html>)rawliteral";
