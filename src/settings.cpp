@@ -33,6 +33,7 @@ void settingsDefaults(Settings& s)
   s.modemStandby = MODEM_STANDBY_SLEEP;
 
   s.gnssKeepOn = true;
+  s.gnssKeepMin = 120;
   s.gnssUseModem = true;
 
   s.obdEnabled = true;
@@ -95,6 +96,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool hide)
   o["modemStandby"] = s.modemStandby;
 
   o["gnssKeepOn"] = s.gnssKeepOn;
+  o["gnssKeepMin"] = s.gnssKeepMin;
   o["gnssUseModem"] = s.gnssUseModem;
 
   o["obdEnabled"] = s.obdEnabled;
@@ -181,6 +183,7 @@ void settingsFromJson(Settings& s, JsonObjectConst o)
   getNum(o, "modemStandby", s.modemStandby);
 
   getNum(o, "gnssKeepOn", s.gnssKeepOn);
+  getNum(o, "gnssKeepMin", s.gnssKeepMin);
   getNum(o, "gnssUseModem", s.gnssUseModem);
 
   getNum(o, "obdEnabled", s.obdEnabled);

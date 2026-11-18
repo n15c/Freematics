@@ -62,6 +62,18 @@ void Vehicle::sleep()
   liveUnlock();
 }
 
+void Vehicle::idle()
+{
+  if (!m_obd.link) return;
+  m_ready = false;
+  m_obdMode = false;
+  char buf[32];
+  cmd("ATPC\r", buf, sizeof(buf)); // close the protocol: no more bus traffic
+  liveLock();
+  live.obdConnected = false;
+  liveUnlock();
+}
+
 void Vehicle::wake()
 {
   if (!m_obd.link) return;

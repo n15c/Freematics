@@ -26,6 +26,8 @@ public:
   float readVoltage();
   // co-processor low power mode / wake up
   void sleep();
+  // stop OBD/CAN activity but keep the co-processor awake (its GNSS keeps running)
+  void idle();
   void wake();
   // append "&key=value" pairs of fresh values (max age in ms)
   void appendAttrs(char* buf, size_t size, uint32_t maxAge);

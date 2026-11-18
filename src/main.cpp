@@ -276,10 +276,13 @@ static void standby()
   state = PS_STANDBY;
   publishLive();
   uplinkSetStandby(true);
-  // a receiver behind the co-processor is switched off by its low power mode
-  // anyway; switch it off cleanly before the co-processor goes to sleep
-  if (gnss.standalone() && (!cfg.gnssKeepOn || gnss.viaCoprocessor())) gnss.end();
-  vehicle.sleep();
+  // Keeping the receiver powered means a hot start (fix within seconds) when
+  // the car is started again. A receiver behind the co-processor needs the
+  // co-processor awake: it then only stops OBD traffic instead of sleeping.
+  bool keepGnss = gnss.standalone() && cfg.gnssKeepOn && cfg.gnssKeepMin > 0;
+  bool coprocAwake = keepGnss && gnss.viaCoprocessor();
+  if (gnss.standalone() && !keepGnss) gnss.end();
+  if (coprocAwake) vehicle.idle(); else vehicle.sleep();
   memsCalibrate();
 
   uint32_t standbyStart = millis();
@@ -295,7 +298,8 @@ static void standby()
   while (!wake) {
     // light sleep (ESP32 ~1 mA instead of ~30 mA) when nothing else runs;
     // not with the standalone GNSS on, its software UART needs the CPU
-    if (uplinkIdle() && !gnss.standalone()) {
+    // (the co-processor receiver buffers itself, light sleep is fine there)
+    if (uplinkIdle() && (!gnss.standalone() || gnss.viaCoprocessor())) {
       Serial.flush();
       esp_sleep_enable_timer_wakeup(STANDBY_POLL_MS * 1000ULL);
       esp_light_sleep_start();
@@ -348,6 +352,10 @@ static void standby()
             Log.printf("[PWR] battery low (%.2f V): protection on\n", voltage);
             uplinkSetBatterySaver(true);
             if (gnss.standalone()) gnss.end();
+            if (coprocAwake) {
+              vehicle.sleep();
+              coprocAwake = false;
+            }
           }
         } else if (voltage >= cfg.lowVoltage) {
           lowSince = 0;
@@ -360,13 +368,23 @@ static void standby()
       }
     }
     // GNSS hot standby only for short stops
-    if (gnss.standalone() && now - standbyStart > GNSS_KEEP_ON_MAX_MS) {
+    if (gnss.standalone() && now - standbyStart > cfg.gnssKeepMin * 60000UL) {
       Log.println("[GNSS] off (long standby)");
       gnss.end();
+      if (coprocAwake) {
+        vehicle.sleep();
+        coprocAwake = false;
+      }
     }
 
     // keep GNSS fix fresh (hot start) and send heartbeats
-    gnss.update(); // standalone receiver or modem GNSS fed by the uplink task
+    // standalone receiver or modem GNSS fed by the uplink task; the
+    // co-processor receiver is polled less often (each poll is a command)
+    static uint32_t lastGnssPoll = 0;
+    if (!gnss.viaCoprocessor() || now - lastGnssPoll >= 2000) {
+      lastGnssPoll = now;
+      gnss.update();
+    }
     if (!saver && cfg.heartbeatMin && now - lastHeartbeat >= cfg.heartbeatMin * 60000UL) {
       lastHeartbeat = now;
       Log.println("[PWR] heartbeat");
@@ -380,11 +398,9 @@ static void standby()
   uplinkSetBatterySaver(false);
   uplinkSetStandby(false);
   vehicle.wake();
-  if (gnssHw && (!gnss.standalone() || !gnss.hasFix(30000))) {
-    // off, or on but without data (e.g. behind the sleeping co-processor)
-    if (gnss.standalone()) gnss.end();
-    gnss.begin(&sys);
-  }
+  // restart the receiver only if it was switched off: a running receiver
+  // keeps satellites and ephemeris (hot start), even without a fix right now
+  if (gnssHw && !gnss.standalone()) gnss.begin(&sys);
   gnss.resetFilter();
   state = PS_IDLE;
   idleSince = millis();

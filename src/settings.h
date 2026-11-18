@@ -64,6 +64,7 @@ struct Settings {
 
   // GNSS
   bool gnssKeepOn;          // keep GNSS powered in standby (hot start, ~25 mA)
+  uint16_t gnssKeepMin;     // ... for this many minutes after parking
   bool gnssUseModem;        // use the modem's GNSS if no standalone receiver is found
 
   // vehicle

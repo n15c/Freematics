@@ -113,7 +113,8 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
   <div><label>Standby nach Zündung aus (s)</label><input id="standbyDelay" type="number" min="10"></div>
   <div><label>Batterieschutz unter (V, 0 = aus)</label><input id="lowVoltage" type="number" step="0.1"></div>
  </div>
- <label class="chk"><input type="checkbox" id="gnssKeepOn">GNSS im Standby eingeschaltet lassen (sofortige Position nach dem Start, ca. 25 mA)</label>
+ <label class="chk"><input type="checkbox" id="gnssKeepOn">GNSS im Standby eingeschaltet lassen (Fix nach dem Start in Sekunden statt ca. 30–60 s, ca. 25–40 mA)</label>
+ <div class="row"><div><label>… für Minuten nach dem Abstellen</label><input id="gnssKeepMin" type="number" min="0" max="1440"></div></div>
  <label class="chk"><input type="checkbox" id="gnssUseModem">GNSS des Modems verwenden, falls kein GNSS-Empfänger vorhanden</label>
  <p class="hint">Batterieschutz: Fällt die Spannung im Standby 1 Minute unter den Wert, werden Modem und GNSS ganz ausgeschaltet und keine Heartbeats mehr gesendet. Ab +0,3 V oder beim Motorstart wird wieder normal gearbeitet. GNSS bleibt höchstens 2 h warm, das Modem höchstens 24 h im Flugmodus. Das Gerät wacht ohne Neustart auf, sobald die Bordspannung über die Schwelle steigt (Motor/Lichtmaschine), sie um den eingestellten Wert ansteigt oder Bewegung erkannt wird.</p></div>
  <div class="bar"><button class="btn" onclick="save()">Speichern &amp; neu starten</button></div>
@@ -140,7 +141,7 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
 </main><div id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);let C={},S={};
-const fields=['serverUrl','liveUrl','deviceId','httpMethod','intervalDriving','intervalIdle','heartbeatMin','headingChange','wifiSsid','wifiPass','apSsid','apPass','apMode','webPass','cellEnabled','apn','apnUser','apnPass','simPin','netMode','modemStandby','obdEnabled','obdProtocol','canEnabled','canProtocol','autoUpdate','updateUrl','runVoltage','wakeDelta','motionG','standbyDelay','lowVoltage','gnssKeepOn','gnssUseModem'];
+const fields=['serverUrl','liveUrl','deviceId','httpMethod','intervalDriving','intervalIdle','heartbeatMin','headingChange','wifiSsid','wifiPass','apSsid','apPass','apMode','webPass','cellEnabled','apn','apnUser','apnPass','simPin','netMode','modemStandby','obdEnabled','obdProtocol','canEnabled','canProtocol','autoUpdate','updateUrl','runVoltage','wakeDelta','motionG','standbyDelay','lowVoltage','gnssKeepOn','gnssKeepMin','gnssUseModem'];
 function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';clearTimeout(e._t);e._t=setTimeout(()=>e.style.display='none',3000)}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x==b));document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hide',s.id!='t-'+b.dataset.t))});
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
