@@ -10,10 +10,22 @@
 #define FW_COMMIT "unknown"
 #define FW_BUILD_TIME __DATE__ " " __TIME__
 #endif
+#ifndef FW_COMMIT_EPOCH
+#define FW_COMMIT_EPOCH 0
+#endif
+#ifndef FW_ENV
+#ifdef BOARD_HAS_PSRAM
+#define FW_ENV "freematics_one_plus_psram"
+#else
+#define FW_ENV "freematics_one_plus"
+#endif
+#endif
 
 uint32_t fwBuild() { return FW_BUILD; }
 const char* fwCommit() { return FW_COMMIT; }
 const char* fwBuildTime() { return FW_BUILD_TIME; }
+uint32_t fwCommitEpoch() { return FW_COMMIT_EPOCH; }
+const char* fwEnv() { return FW_ENV; }
 
 const char* fwVersionString()
 {

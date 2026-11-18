@@ -12,6 +12,7 @@
 #include "modem.h"
 #include "gnss.h"
 #include "webui.h"
+#include "ota.h"
 
 enum CellState : uint8_t { CS_DISABLED = 0, CS_OFF, CS_SLEEP, CS_SEARCH, CS_ATTACH, CS_READY };
 
@@ -469,6 +470,14 @@ static void uplinkTask(void*)
     liveUnlock();
 
     periodic(link);
+
+    // firmware updates: only over WiFi, automatically only with ignition off
+    {
+      liveLock();
+      bool ign = live.ignition;
+      liveUnlock();
+      otaService(link == LINK_WIFI, ign, standby);
+    }
 
     if (link == LINK_NONE || !pending || (int32_t)(now - backoffUntil) < 0) {
       delay(100);

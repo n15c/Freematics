@@ -23,6 +23,7 @@
 #include "uplink.h"
 #include "webui.h"
 #include "version.h"
+#include "ota.h"
 #include <esp_ota_ops.h>
 #include <esp_sleep.h>
 
@@ -255,7 +256,7 @@ static const char* standbyBlocker(uint32_t now, bool moving)
   if (ignition) return "ignition on";
   if (moving) return "vehicle moving (GNSS)";
   if (now - lastMotion < 30000) return "motion detected (MEMS)";
-  if (webBusy()) return "firmware update";
+  if (webBusy() || otaBusy()) return "firmware update";
   if (webRecentlyUsed(WEB_ACTIVE_MS)) return "web UI in use";
   if (powerOnBoot && now - live.bootMs < CONFIG_WINDOW_MS) {
     snprintf(buf, sizeof(buf), "configuration window after power-up (%lus left)",

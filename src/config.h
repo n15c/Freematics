@@ -51,4 +51,6 @@
 // Hardware
 // ---------------------------------------------------------------------------
 #define WEB_PORT 80
+#define OTA_CHECK_INTERVAL_MS (6 * 3600000UL)
+#define OTA_DEFAULT_URL "https://github.com/n15c/Freematics/releases/latest/download/"
 #define MDNS_NAME "freematics"

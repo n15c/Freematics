@@ -61,6 +61,20 @@ Jeder Build trägt eine **Build-Nummer**: die Anzahl der Git-Commits, dazu der C
 - im Web UI in der Kopfzeile und unter *System*
 - in `/api/status`
 
+### Automatische Updates von GitHub
+
+Bei jedem Push auf `master` baut GitHub Actions die Firmware für beide Varianten und veröffentlicht ein Release `build-<N>` mit `firmware-<env>.bin` und `firmware-<env>.json` (Build, Commit, Grösse, SHA-256). Ein Release lässt sich auch manuell erzeugen: *Actions → build → Run workflow* mit „release“.
+
+Das Gerät lädt `<Update-Quelle>firmware-<env>.json`. Standard für die Update-Quelle ist `https://github.com/n15c/Freematics/releases/latest/download/`. Ist das Release neuer (Commit-Zeit), lädt das Gerät das Image, prüft die SHA-256-Prüfsumme und startet neu. Dabei gilt:
+
+- nur über WLAN, nie über Mobilfunk
+- automatisch nur bei ausgeschalteter Zündung: 2 min nach dem Start, danach alle 6 h
+- *System → Jetzt prüfen & installieren* startet die Prüfung sofort
+- während des Downloads kein Standby
+- abschaltbar unter *System → Automatisches Update*
+
+Das TLS-Zertifikat von GitHub wird auf dem Gerät nicht geprüft, es ist kein CA-Bundle eingebaut. Die Prüfsumme schützt vor defekten Downloads. Gegen jemanden, der im selben WLAN Manifest und Image austauscht, schützt sie nicht.
+
 Nach einem OTA-Update vergleicht das Web UI die Build-Nummer vor und nach dem Neustart. Ist sie unverändert, erscheint eine Warnung. Die aktive Partition wechselt bei jedem erfolgreichen Update.
 
 ## Einrichtung

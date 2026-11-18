@@ -125,7 +125,12 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
  <p class="hint">Zeiten in UTC (bzw. +Sekunden seit Start, solange die Uhrzeit unbekannt ist). Der Log überlebt Neustarts und Updates, nicht aber das Ausstecken.</p>
  <pre id="logBox" style="height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;margin:10px 0 0"></pre></div></section>
 <section id="t-system" class="hide">
- <div class="card"><h2>Firmware-Update</h2><p class="hint">Installiert: <b id="fwcur">…</b></p><input type="file" id="fw" accept=".bin"><div class="bar"><button class="btn" onclick="ota()">Hochladen</button><span id="otap"></span></div></div>
+ <div class="card"><h2>Automatisches Update (GitHub)</h2>
+  <label class="chk"><input type="checkbox" id="autoUpdate">Neue Firmware automatisch installieren (nur über WLAN, nur bei Zündung aus, alle 6 h geprüft)</label>
+  <label>Update-Quelle</label><input id="updateUrl" placeholder="https://github.com/&lt;user&gt;/&lt;repo&gt;/releases/latest/download/">
+  <p class="hint">Status: <b id="otaRes">…</b></p>
+  <div class="bar"><button class="btn sec" onclick="post('/api/ota/check','Prüfung gestartet…')">Jetzt prüfen &amp; installieren</button><button class="btn" onclick="save()">Speichern &amp; neu starten</button></div></div>
+ <div class="card"><h2>Firmware-Update (Datei)</h2><p class="hint">Installiert: <b id="fwcur">…</b></p><input type="file" id="fw" accept=".bin"><div class="bar"><button class="btn" onclick="ota()">Hochladen</button><span id="otap"></span></div></div>
  <div class="card"><h2>Wartung</h2><div class="bar">
   <button class="btn sec" onclick="post('/api/restart','Neustart…')">Neu starten</button>
   <button class="btn sec" onclick="if(confirm('Warteschlange löschen?'))post('/api/queue/clear','Gelöscht')">Warteschlange löschen</button>
@@ -135,7 +140,7 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
 </main><div id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);let C={},S={};
-const fields=['serverUrl','liveUrl','deviceId','httpMethod','intervalDriving','intervalIdle','heartbeatMin','headingChange','wifiSsid','wifiPass','apSsid','apPass','apMode','webPass','cellEnabled','apn','apnUser','apnPass','simPin','netMode','modemStandby','obdEnabled','obdProtocol','canEnabled','canProtocol','runVoltage','wakeDelta','motionG','standbyDelay','lowVoltage','gnssKeepOn','gnssUseModem'];
+const fields=['serverUrl','liveUrl','deviceId','httpMethod','intervalDriving','intervalIdle','heartbeatMin','headingChange','wifiSsid','wifiPass','apSsid','apPass','apMode','webPass','cellEnabled','apn','apnUser','apnPass','simPin','netMode','modemStandby','obdEnabled','obdProtocol','canEnabled','canProtocol','autoUpdate','updateUrl','runVoltage','wakeDelta','motionG','standbyDelay','lowVoltage','gnssKeepOn','gnssUseModem'];
 function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';clearTimeout(e._t);e._t=setTimeout(()=>e.style.display='none',3000)}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x==b));document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hide',s.id!='t-'+b.dataset.t))});
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -145,7 +150,7 @@ const hex=(n,w)=>Number(n||0).toString(16).toUpperCase().padStart(w||3,'0');
 const dur=s=>s<0?'–':s<60?s+' s':s<3600?Math.round(s/60)+' min':(s/3600).toFixed(1)+' h';
 async function status(){try{const r=await fetch('/api/status');S=await r.json();}catch(e){$('hdr').className='pill err';$('hdr').textContent='offline';return}
  const st={driving:['Fahrt','ok'],idle:['Zündung aus','warn'],standby:['Standby',''],boot:['Start','']}[S.state]||[S.state];
- $('hdr').className='pill '+st[1];$('hdr').textContent=st[0];$('ver').textContent='v'+S.fw+' · Build '+S.build;$('fwcur').textContent=S.fw+' Build '+S.build+' ('+S.commit+', '+S.buildTime+', '+S.partition+')';otaCheck();
+ $('hdr').className='pill '+st[1];$('hdr').textContent=st[0];$('ver').textContent='v'+S.fw+' · Build '+S.build;$('fwcur').textContent=S.fw+' Build '+S.build+' ('+S.commit+', '+S.buildTime+', '+S.partition+')';otaCheck();if(S.ota){$('otaRes').textContent=S.ota.result+(S.ota.busy&&S.ota.progress>=0?' '+S.ota.progress+' %':'')}
  const v=S.vehicle,g=S.gnss,n=S.net;
  kv('s-veh',[['Zündung',S.ignition?pill('an','ok'):pill('aus')],['Spannung',S.voltage+' V'],['OBD',v.obd?pill('verbunden','ok'):pill('nein')],v.vin&&['VIN',esc(v.vin)],v.dtc.length&&['Fehlercodes',v.dtc.map(d=>pill(d,'err')).join(' ')],['Bewegung',S.motion?'ja':'nein'],S.standbyBlocker&&!S.ignition&&['Kein Standby weil',esc(S.standbyBlocker)]]);
  kv('s-gnss',[['Fix',g.fix?pill('ja','ok'):pill(g.lat?'veraltet':'nein','warn')],g.lat&&['Position',`<a href="https://www.openstreetmap.org/?mlat=${g.lat}&mlon=${g.lon}#map=15/${g.lat}/${g.lon}" target="_blank">${g.lat}, ${g.lon}</a>`],g.lat&&['Tempo',Math.round(g.speed)+' km/h'],g.lat&&['Satelliten',g.sat+' (HDOP '+(+g.hdop).toFixed(1)+')'],g.lat&&['Alter',dur(g.age)],['Quelle',g.source],g.rejected&&['Verworfen',g.rejected]]);

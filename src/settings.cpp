@@ -22,6 +22,8 @@ void settingsDefaults(Settings& s)
   s.intervalIdle = 60;
   s.heartbeatMin = 30;
   s.headingChange = 30;
+  s.autoUpdate = true;
+  strlcpy(s.updateUrl, OTA_DEFAULT_URL, sizeof(s.updateUrl));
 
   s.apMode = AP_ALWAYS;
   strlcpy(s.apPass, "freematics", sizeof(s.apPass));
@@ -74,6 +76,8 @@ void settingsToJson(const Settings& s, JsonObject o, bool hide)
   o["intervalIdle"] = s.intervalIdle;
   o["heartbeatMin"] = s.heartbeatMin;
   o["headingChange"] = s.headingChange;
+  o["autoUpdate"] = s.autoUpdate;
+  o["updateUrl"] = s.updateUrl;
 
   o["wifiSsid"] = s.wifiSsid;
   putSecret(o, "wifiPass", s.wifiPass, hide);
@@ -158,6 +162,8 @@ void settingsFromJson(Settings& s, JsonObjectConst o)
   getNum(o, "intervalIdle", s.intervalIdle);
   getNum(o, "heartbeatMin", s.heartbeatMin);
   getNum(o, "headingChange", s.headingChange);
+  getNum(o, "autoUpdate", s.autoUpdate);
+  getStr(o, "updateUrl", s.updateUrl);
 
   getStr(o, "wifiSsid", s.wifiSsid);
   getStr(o, "wifiPass", s.wifiPass, true);

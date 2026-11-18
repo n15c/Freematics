@@ -19,6 +19,9 @@ build = git("rev-list", "--count", "HEAD") or "0"
 commit = git("rev-parse", "--short", "HEAD") or "unknown"
 if git("status", "--porcelain", "--untracked-files=no"):
     commit += "+"
+# commit time orders builds across branches and squash merges (used by the auto update)
+epoch = git("log", "-1", "--format=%ct") or "0"
+pioenv = env.subst("$PIOENV")
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 content = (
@@ -26,7 +29,9 @@ content = (
     "#pragma once\n"
     "#define FW_BUILD %s\n"
     "#define FW_COMMIT \"%s\"\n"
-    "#define FW_BUILD_TIME \"%s\"\n" % (build, commit, stamp)
+    "#define FW_BUILD_TIME \"%s\"\n"
+    "#define FW_COMMIT_EPOCH %s\n"
+    "#define FW_ENV \"%s\"\n" % (build, commit, stamp, epoch, pioenv)
 )
 
 gen_dir = os.path.join(env.subst("$BUILD_DIR"), "generated")
