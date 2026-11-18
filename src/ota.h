@@ -9,9 +9,11 @@
 #pragma once
 #include <ArduinoJson.h>
 
-// called from the uplink task; downloads only over WiFi, automatically only
-// with the ignition off and at most every few hours
-void otaService(bool wifiUp, bool ignition, bool standby);
+class Modem;
+// called from the uplink task with the current link (LinkType). Over WiFi, or
+// over cellular when enabled and not roaming (download in byte ranges);
+// automatically only with the ignition off and at most every few hours
+void otaService(uint8_t link, Modem* modem, bool roaming, bool ignition, bool standby);
 // web UI: check (and install) now
 void otaRequestCheck();
 // true while a download/installation runs (no standby)

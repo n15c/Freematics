@@ -476,7 +476,7 @@ static void uplinkTask(void*)
       liveLock();
       bool ign = live.ignition;
       liveUnlock();
-      otaService(link == LINK_WIFI, ign, standby);
+      otaService(link, &modem, modem.roaming(), ign, standby);
     }
 
     if (link == LINK_NONE || !pending || (int32_t)(now - backoffUntil) < 0) {

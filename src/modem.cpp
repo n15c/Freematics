@@ -409,13 +409,14 @@ bool Modem::httpSimcomA(const char* url, const char* body, int& status)
   return true;
 }
 
-bool Modem::httpSim7070(const char* url, const char* body, int& status)
+// open (or reuse) the SIM7070 HTTP session for the host of url; path = request path
+bool Modem::shSession(const char* url, const char*& path)
 {
   // split url into base (scheme://host:port) and path
   const char* hostStart = strstr(url, "://");
   if (!hostStart) return false;
   hostStart += 3;
-  const char* path = strchr(hostStart, '/');
+  path = strchr(hostStart, '/');
   const char* q = strchr(hostStart, '?');
   if (!path || (q && q < path)) path = q;
   char base[96];
@@ -456,6 +457,13 @@ bool Modem::httpSim7070(const char* url, const char* body, int& status)
     strlcpy(m_shBase, base, sizeof(m_shBase));
     m_shConnected = true;
   }
+  return true;
+}
+
+bool Modem::httpSim7070(const char* url, const char* body, int& status)
+{
+  const char* path = nullptr;
+  if (!shSession(url, path)) return false;
   at("AT+SHCHEAD");
   at("AT+SHAHEAD=\"Connection\",\"keep-alive\"");
   if (body) {
@@ -485,6 +493,140 @@ bool Modem::httpSim7070(const char* url, const char* body, int& status)
     return false;
   }
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// binary downloads (firmware): ranged GET, body read in pieces
+// ---------------------------------------------------------------------------
+// read raw bytes until token appeared and the line after it is complete;
+// returns offset of the first byte after that line in m_raw, -1 on timeout
+int Modem::rawLine(const char* token, uint32_t timeout, int& value)
+{
+  m_rawLen = 0;
+  uint32_t t = millis();
+  int tl = strlen(token);
+  while (millis() - t < timeout) {
+    int n = m_sys->xbRead((char*)m_raw + m_rawLen, sizeof(m_raw) - m_rawLen, 20);
+    if (n > 0) m_rawLen += n;
+    for (int i = 0; i + tl <= m_rawLen; i++) {
+      if (memcmp(m_raw + i, token, tl)) continue;
+      int j = i + tl;
+      int e = j;
+      while (e + 1 < m_rawLen && !(m_raw[e] == '\r' && m_raw[e + 1] == '\n')) e++;
+      if (e + 1 >= m_rawLen) break; // line not complete yet
+      // value: last number on the line ("+HTTPREAD: DATA,1024" / "+SHREAD: 1024")
+      value = 0;
+      for (int k = j; k < e; k++) {
+        if (isdigit(m_raw[k])) value = value * 10 + (m_raw[k] - '0');
+        else value = 0;
+      }
+      return e + 2;
+    }
+    if (m_rawLen >= (int)sizeof(m_raw)) {
+      // keep the tail (token may straddle)
+      memmove(m_raw, m_raw + m_rawLen - 64, 64);
+      m_rawLen = 64;
+    }
+  }
+  return -1;
+}
+
+// after rawLine(): copy n data bytes (partly already in m_raw) into out
+bool Modem::rawData(int offset, uint8_t* out, int n, uint32_t timeout)
+{
+  int have = m_rawLen - offset;
+  if (have > n) have = n;
+  if (have > 0) memcpy(out, m_raw + offset, have);
+  int got = have > 0 ? have : 0;
+  uint32_t t = millis();
+  while (got < n && millis() - t < timeout) {
+    int r = m_sys->xbRead((char*)out + got, n - got, 50);
+    if (r > 0) { got += r; t = millis(); }
+  }
+  return got == n;
+}
+
+int Modem::httpGetBinary(const char* url, uint32_t from, uint32_t len, uint8_t* out, int maxLen, int& status)
+{
+  status = 0;
+  char c[96];
+  int bodyLen = -1;
+  bool ranged = len > 0;
+  if (m_type == MODEM_SIM7070) {
+    const char* path = nullptr;
+    if (!shSession(url, path)) return -1;
+    at("AT+SHCHEAD");
+    at("AT+SHAHEAD=\"Connection\",\"keep-alive\"");
+    if (ranged) {
+      snprintf(c, sizeof(c), "AT+SHAHEAD=\"Range\",\"bytes=%lu-%lu\"", (unsigned long)from, (unsigned long)(from + len - 1));
+      at(c);
+    }
+    m_sys->xbPurge();
+    m_sys->xbWrite("AT+SHREQ=\"");
+    m_sys->xbWrite(path ? path : "/");
+    m_sys->xbWrite("\",1\r");
+    m_buf[0] = 0;
+    if (!waitFor("+SHREQ:", HTTP_TIMEOUT_MS + 5000)) { m_shConnected = false; return -1; }
+    const char* p = strstr(m_buf, "+SHREQ:");
+    p = p ? strchr(p, ',') : nullptr;
+    if (!p) return -1;
+    status = atoi(p + 1);
+    p = strchr(p + 1, ',');
+    bodyLen = p ? atoi(p + 1) : 0;
+  } else {
+    if (!m_httpInit) {
+      at("AT+HTTPTERM", 1000);
+      if (!at("AT+HTTPINIT", 5000)) return -1;
+      at("AT+CSSLCFG=\"sslversion\",0,4");
+      at("AT+CSSLCFG=\"authmode\",0,0");
+      at("AT+CSSLCFG=\"enableSNI\",0,1");
+      at("AT+HTTPPARA=\"SSLCFG\",0");
+      m_httpInit = true;
+    }
+    m_sys->xbPurge();
+    m_sys->xbWrite("AT+HTTPPARA=\"URL\",\"");
+    m_sys->xbWrite(url);
+    m_sys->xbWrite("\"\r");
+    if (!at(nullptr, 2000)) { m_httpInit = false; return -1; }
+    if (ranged) snprintf(c, sizeof(c), "AT+HTTPPARA=\"USERDATA\",\"Range: bytes=%lu-%lu\"", (unsigned long)from, (unsigned long)(from + len - 1));
+    else strcpy(c, "AT+HTTPPARA=\"USERDATA\",\"\"");
+    at(c);
+    m_sys->xbPurge();
+    m_sys->xbWrite("AT+HTTPACTION=0\r");
+    m_buf[0] = 0;
+    bool ok = waitFor("+HTTPACTION:", HTTP_TIMEOUT_MS + 15000);
+    if (ranged) at("AT+HTTPPARA=\"USERDATA\",\"\""); // do not leak into later requests
+    if (!ok) { m_httpInit = false; return -1; }
+    const char* p = strstr(m_buf, "+HTTPACTION:");
+    p = p ? strchr(p, ',') : nullptr;
+    if (!p) return -1;
+    status = atoi(p + 1);
+    p = strchr(p + 1, ',');
+    bodyLen = p ? atoi(p + 1) : 0;
+    if (status >= 600) { m_httpInit = false; return -1; }
+  }
+  if (status != 200 && status != 206) return -1;
+  if (bodyLen > maxLen) bodyLen = maxLen;
+  // read the body in pieces
+  int pos = 0;
+  while (pos < bodyLen) {
+    int piece = bodyLen - pos > 1024 ? 1024 : bodyLen - pos;
+    bool ok = false;
+    for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+      m_sys->xbPurge();
+      if (m_type == MODEM_SIM7070) snprintf(c, sizeof(c), "AT+SHREAD=%d,%d\r", pos, piece);
+      else snprintf(c, sizeof(c), "AT+HTTPREAD=%d,%d\r", pos, piece);
+      m_sys->xbWrite(c);
+      int n = 0;
+      int off = rawLine(m_type == MODEM_SIM7070 ? "+SHREAD:" : "+HTTPREAD:", 5000, n);
+      if (off < 0 || n <= 0) continue;
+      if (n > piece) n = piece;
+      ok = rawData(off, out + pos, n, 3000);
+      if (ok) pos += n;
+    }
+    if (!ok) return -1;
+  }
+  return bodyLen;
 }
 
 // ---------------------------------------------------------------------------

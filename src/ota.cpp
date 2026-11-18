@@ -9,6 +9,8 @@
 #include "settings.h"
 #include "version.h"
 #include "uplink.h"
+#include "live.h"
+#include "modem.h"
 
 static volatile bool s_request = false;
 static volatile bool s_busy = false;
@@ -130,7 +132,89 @@ static bool install(const char* url, int size, const char* sha)
   return true;
 }
 
-static void check(bool manual)
+// cellular: download in byte ranges through the modem's HTTP stack
+static bool installCell(Modem* modem, const char* url, int size, const char* sha)
+{
+  if (size <= 0) {
+    setResult("Update-Info ohne Grösse");
+    return false;
+  }
+  int chunk = 8192;
+  uint8_t* buf = nullptr;
+#ifdef BOARD_HAS_PSRAM
+  buf = (uint8_t*)ps_malloc(32768);
+  if (buf) chunk = 32768;
+#endif
+  if (!buf) buf = (uint8_t*)malloc(chunk);
+  if (!buf) {
+    setResult("kein Speicher für den Download");
+    return false;
+  }
+  if (!Update.begin(size)) {
+    setResult("Update.begin: %s", Update.errorString());
+    free(buf);
+    return false;
+  }
+  mbedtls_sha256_context ctx;
+  mbedtls_sha256_init(&ctx);
+  mbedtls_sha256_starts_ret(&ctx, 0);
+  int pos = 0;
+  bool ok = true;
+  uint32_t t0 = millis();
+  while (pos < size && ok) {
+    int want = size - pos > chunk ? chunk : size - pos;
+    int got = -1, status = 0;
+    for (int attempt = 0; attempt < 3 && got <= 0; attempt++) {
+      got = modem->httpGetBinary(url, pos, want, buf, want, status);
+      if (status == 301 || status == 302) {
+        setResult("Weiterleitung (HTTP %d): Update-Quelle muss direkt erreichbar sein (raw.githubusercontent.com)", status);
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) break;
+    if (got <= 0) {
+      setResult("Download über Mobilfunk abgebrochen bei %d von %d Bytes (HTTP %d)", pos, size, status);
+      ok = false;
+      break;
+    }
+    // a server without range support sends the whole file: only accept the start
+    if (status == 200 && pos > 0) {
+      setResult("Server unterstützt keine Teil-Downloads");
+      ok = false;
+      break;
+    }
+    mbedtls_sha256_update_ret(&ctx, buf, got);
+    if (Update.write(buf, got) != (size_t)got) {
+      setResult("Update.write: %s", Update.errorString());
+      ok = false;
+      break;
+    }
+    pos += got;
+    s_progress = (int)((int64_t)pos * 100 / size);
+  }
+  free(buf);
+  uint8_t digest[32];
+  mbedtls_sha256_finish_ret(&ctx, digest);
+  mbedtls_sha256_free(&ctx);
+  if (!ok) {
+    Update.abort();
+    return false;
+  }
+  if (!hexEqual(digest, sha)) {
+    Update.abort();
+    setResult("Prüfsumme falsch, Update verworfen");
+    return false;
+  }
+  if (!Update.end(true)) {
+    setResult("Update.end: %s", Update.errorString());
+    return false;
+  }
+  Log.printf("[OTA] %d bytes via cellular in %lus\n", size, (unsigned long)(millis() - t0) / 1000);
+  return true;
+}
+
+static void check(bool manual, Modem* modem)
 {
   s_busy = true;
   s_progress = -1;
@@ -139,23 +223,40 @@ static void check(bool manual)
 
   char url[220];
   snprintf(url, sizeof(url), "%sfirmware-%s.json", cfg.updateUrl, fwEnv());
-  HTTPClient http;
-  WiFiClientSecure tls;
-  beginHttp(http, tls, url);
-  int code = http.GET();
-  if (code != 200) {
-    setResult("keine Update-Info (HTTP %d)", code);
-    http.end();
-    s_busy = false;
-    return;
-  }
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, http.getString());
-  http.end();
-  if (err) {
-    setResult("Update-Info ungültig");
-    s_busy = false;
-    return;
+  if (modem) {
+    static uint8_t mbuf[2048];
+    int status = 0;
+    int n = modem->httpGetBinary(url, 0, 0, mbuf, sizeof(mbuf) - 1, status);
+    if (n <= 0) {
+      setResult("keine Update-Info über Mobilfunk (HTTP %d)", status);
+      s_busy = false;
+      return;
+    }
+    mbuf[n] = 0;
+    if (deserializeJson(doc, (const char*)mbuf)) {
+      setResult("Update-Info ungültig");
+      s_busy = false;
+      return;
+    }
+  } else {
+    HTTPClient http;
+    WiFiClientSecure tls;
+    beginHttp(http, tls, url);
+    int code = http.GET();
+    if (code != 200) {
+      setResult("keine Update-Info (HTTP %d)", code);
+      http.end();
+      s_busy = false;
+      return;
+    }
+    DeserializationError err = deserializeJson(doc, http.getString());
+    http.end();
+    if (err) {
+      setResult("Update-Info ungültig");
+      s_busy = false;
+      return;
+    }
   }
   uint32_t build = doc["build"] | 0;
   uint32_t epoch = doc["epoch"] | 0;
@@ -177,8 +278,9 @@ static void check(bool manual)
     s_busy = false;
     return;
   }
-  setResult("installiere Build %u ...", (unsigned)build);
-  if (install(binUrl, size, sha)) {
+  setResult("installiere Build %u über %s ...", (unsigned)build, modem ? "Mobilfunk" : "WLAN");
+  bool ok = modem ? installCell(modem, binUrl, size, sha) : install(binUrl, size, sha);
+  if (ok) {
     setResult("Build %u installiert, Neustart", (unsigned)build);
     delay(500);
     systemRestart();
@@ -187,22 +289,24 @@ static void check(bool manual)
   s_busy = false;
 }
 
-void otaService(bool wifiUp, bool ignition, bool standby)
+void otaService(uint8_t link, Modem* modem, bool roaming, bool ignition, bool standby)
 {
   if (!cfg.updateUrl[0]) return;
+  bool wifi = link == LINK_WIFI;
+  bool cell = link == LINK_CELL && modem && cfg.otaCellular && !roaming;
   if (s_request) {
     s_request = false;
-    if (!wifiUp) {
-      setResult("Updates nur über WLAN (keine WLAN-Verbindung)");
-      return;
-    }
-    check(true);
+    if (wifi) check(true, nullptr);
+    else if (cell) check(true, modem);
+    else if (link == LINK_CELL && roaming) setResult("keine Updates im Roaming");
+    else if (link == LINK_CELL) setResult("Updates über Mobilfunk sind ausgeschaltet");
+    else setResult("keine Verbindung");
     return;
   }
-  if (!cfg.autoUpdate || !wifiUp || ignition || standby) return;
+  if (!cfg.autoUpdate || (!wifi && !cell) || ignition || standby) return;
   uint32_t now = millis();
   // first check 2 min after boot, then every 6 h
   uint32_t due = s_lastCheck ? OTA_CHECK_INTERVAL_MS : 120000UL;
   if (now - (s_lastCheck ? s_lastCheck : 0) < due) return;
-  check(false);
+  check(false, wifi ? nullptr : modem);
 }

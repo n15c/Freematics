@@ -23,6 +23,7 @@ void settingsDefaults(Settings& s)
   s.heartbeatMin = 30;
   s.headingChange = 30;
   s.autoUpdate = true;
+  s.otaCellular = true;
   strlcpy(s.updateUrl, OTA_DEFAULT_URL, sizeof(s.updateUrl));
 
   s.apMode = AP_ALWAYS;
@@ -79,6 +80,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool hide)
   o["heartbeatMin"] = s.heartbeatMin;
   o["headingChange"] = s.headingChange;
   o["autoUpdate"] = s.autoUpdate;
+  o["otaCellular"] = s.otaCellular;
   o["updateUrl"] = s.updateUrl;
 
   o["wifiSsid"] = s.wifiSsid;
@@ -167,6 +169,7 @@ void settingsFromJson(Settings& s, JsonObjectConst o)
   getNum(o, "heartbeatMin", s.heartbeatMin);
   getNum(o, "headingChange", s.headingChange);
   getNum(o, "autoUpdate", s.autoUpdate);
+  getNum(o, "otaCellular", s.otaCellular);
   getStr(o, "updateUrl", s.updateUrl);
 
   getStr(o, "wifiSsid", s.wifiSsid);
@@ -260,6 +263,9 @@ bool settingsLoad()
   JsonDocument doc;
   if (deserializeJson(doc, json)) return false;
   settingsFromJson(cfg, doc.as<JsonObjectConst>());
+  // the update source moved from GitHub releases (redirects, not usable over
+  // cellular) to the firmware branch on raw.githubusercontent.com
+  if (!strcmp(cfg.updateUrl, OTA_OLD_DEFAULT_URL)) strlcpy(cfg.updateUrl, OTA_DEFAULT_URL, sizeof(cfg.updateUrl));
   return true;
 }
 

@@ -732,7 +732,8 @@ bool FreematicsESP32::xbBegin(unsigned long baudrate, int pinRx, int pinTx)
     //Set UART pins
     uart_set_pin(BEE_UART_NUM, pinTx, pinRx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     //Install UART driver
-    uart_driver_install(BEE_UART_NUM, UART_BUF_SIZE, 0, 0, NULL, 0);
+    // 4 KB RX buffer: firmware downloads stream binary data at full baud rate
+    uart_driver_install(BEE_UART_NUM, 4096, 0, 0, NULL, 0);
 
 #ifdef PIN_BEE_PWR
 	pinMode(PIN_BEE_PWR, OUTPUT);

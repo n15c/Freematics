@@ -128,8 +128,9 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
  <pre id="logBox" style="height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;margin:10px 0 0"></pre></div></section>
 <section id="t-system" class="hide">
  <div class="card"><h2>Automatisches Update (GitHub)</h2>
-  <label class="chk"><input type="checkbox" id="autoUpdate">Neue Firmware automatisch installieren (nur über WLAN, nur bei Zündung aus, alle 6 h geprüft)</label>
-  <label>Update-Quelle</label><input id="updateUrl" placeholder="https://github.com/&lt;user&gt;/&lt;repo&gt;/releases/latest/download/">
+  <label class="chk"><input type="checkbox" id="autoUpdate">Neue Firmware automatisch installieren (nur bei Zündung aus, alle 6 h geprüft)</label>
+  <label class="chk"><input type="checkbox" id="otaCellular">Auch über Mobilfunk laden (nie im Roaming, ca. 1,4 MB pro Update)</label>
+  <label>Update-Quelle</label><input id="updateUrl" placeholder="https://raw.githubusercontent.com/&lt;user&gt;/&lt;repo&gt;/firmware/">
   <p class="hint">Status: <b id="otaRes">…</b></p>
   <div class="bar"><button class="btn sec" onclick="post('/api/ota/check','Prüfung gestartet…')">Jetzt prüfen &amp; installieren</button><button class="btn" onclick="save()">Speichern &amp; neu starten</button></div></div>
  <div class="card"><h2>Firmware-Update (Datei)</h2><p class="hint">Installiert: <b id="fwcur">…</b></p><input type="file" id="fw" accept=".bin"><div class="bar"><button class="btn" onclick="ota()">Hochladen</button><span id="otap"></span></div></div>
@@ -142,7 +143,7 @@ th{color:var(--mut);font-weight:500}td input,td select{padding:5px 6px}.tbl{over
 </main><div id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);let C={},S={};
-const fields=['serverUrl','liveUrl','deviceId','httpMethod','intervalDriving','intervalIdle','heartbeatMin','headingChange','wifiSsid','wifiPass','apSsid','apPass','apMode','webPass','cellEnabled','apn','apnUser','apnPass','simPin','netMode','modemStandby','obdEnabled','speedFromObd','obdProtocol','canEnabled','canProtocol','autoUpdate','updateUrl','runVoltage','wakeDelta','motionG','standbyDelay','lowVoltage','gnssKeepOn','gnssKeepMin','gnssUseModem'];
+const fields=['serverUrl','liveUrl','deviceId','httpMethod','intervalDriving','intervalIdle','heartbeatMin','headingChange','wifiSsid','wifiPass','apSsid','apPass','apMode','webPass','cellEnabled','apn','apnUser','apnPass','simPin','netMode','modemStandby','obdEnabled','speedFromObd','obdProtocol','canEnabled','canProtocol','autoUpdate','otaCellular','updateUrl','runVoltage','wakeDelta','motionG','standbyDelay','lowVoltage','gnssKeepOn','gnssKeepMin','gnssUseModem'];
 function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';clearTimeout(e._t);e._t=setTimeout(()=>e.style.display='none',3000)}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x==b));document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hide',s.id!='t-'+b.dataset.t))});
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));

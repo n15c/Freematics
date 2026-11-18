@@ -29,6 +29,9 @@ public:
   void detach();
   // GET (body == nullptr) or POST form body; returns false on transport error
   bool http(const char* url, const char* body, int& status);
+  // GET a binary resource (optionally a byte range); copies up to maxLen body
+  // bytes into out. Returns the number of body bytes, -1 on error.
+  int httpGetBinary(const char* url, uint32_t from, uint32_t len, uint8_t* out, int maxLen, int& status);
   int rssi();
   void updateNetInfo();
   bool syncClock();
@@ -52,6 +55,11 @@ private:
   int regStat(const char* cmd, const char* prefix);
   bool httpSimcomA(const char* url, const char* body, int& status);   // SIM7600/7670 AT+HTTP*
   bool httpSim7070(const char* url, const char* body, int& status);   // SIM7070 AT+SH*
+  bool shSession(const char* url, const char*& path);
+  int rawLine(const char* token, uint32_t timeout, int& value);
+  bool rawData(int offset, uint8_t* out, int n, uint32_t timeout);
+  uint8_t m_raw[1600];
+  int m_rawLen = 0;
   FreematicsESP32* m_sys = nullptr;
   ModemType m_type = MODEM_UNKNOWN;
   char m_buf[640];

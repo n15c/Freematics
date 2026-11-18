@@ -42,7 +42,8 @@ struct Settings {
   uint16_t intervalIdle;    // s between points while ignition off but still awake
   uint16_t heartbeatMin;    // min between heartbeats while parked (0 = none)
   uint8_t headingChange;    // degrees: send extra point on course change (0 = off)
-  bool autoUpdate;          // install new firmware from updateUrl automatically (WiFi only)
+  bool autoUpdate;          // install new firmware from updateUrl automatically
+  bool otaCellular;         // ... also over cellular (never while roaming)
   char updateUrl[160];      // base URL of the release files
 
   // WiFi
