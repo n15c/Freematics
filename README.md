@@ -63,17 +63,24 @@ Jeder Build trägt eine **Build-Nummer**: die Anzahl der Git-Commits, dazu der C
 
 ### Automatische Updates von GitHub
 
-Bei jedem Push auf `master` baut GitHub Actions die Firmware für beide Varianten und veröffentlicht ein Release `build-<N>` mit `firmware-<env>.bin` und `firmware-<env>.json` (Build, Commit, Grösse, SHA-256). Ein Release lässt sich auch manuell erzeugen: *Actions → build → Run workflow* mit „release“.
+Bei jedem Push auf `master` baut GitHub Actions die Firmware für beide Varianten und veröffentlicht sie zweimal:
 
-Das Gerät lädt `<Update-Quelle>firmware-<env>.json`. Standard für die Update-Quelle ist `https://github.com/n15c/Freematics/releases/latest/download/`. Ist das Release neuer (Commit-Zeit), lädt das Gerät das Image, prüft die SHA-256-Prüfsumme und startet neu. Dabei gilt:
+- als Release `build-<N>`
+- auf dem Branch **`firmware`**, mit `firmware-<env>.bin` und `firmware-<env>.json` (Build, Commit, Grösse, SHA-256)
 
-- nur über WLAN, nie über Mobilfunk
-- automatisch nur bei ausgeschalteter Zündung: 2 min nach dem Start, danach alle 6 h
-- *System → Jetzt prüfen & installieren* startet die Prüfung sofort
-- während des Downloads kein Standby
-- abschaltbar unter *System → Automatisches Update*
+Ein Release lässt sich auch manuell erzeugen: *Actions → build → Run workflow* mit „release“.
 
-Das TLS-Zertifikat von GitHub wird auf dem Gerät nicht geprüft, es ist kein CA-Bundle eingebaut. Die Prüfsumme schützt vor defekten Downloads. Gegen jemanden, der im selben WLAN Manifest und Image austauscht, schützt sie nicht.
+Das Gerät lädt `<Update-Quelle>firmware-<env>.json`. Standard für die Update-Quelle ist `https://raw.githubusercontent.com/n15c/Freematics/firmware/`: Dieser Server liefert ohne Weiterleitung und unterstützt Teil-Downloads. Ist der Build dort neuer (Commit-Zeit), lädt das Gerät das Image, prüft die SHA-256-Prüfsumme und startet neu.
+
+- Über **WLAN** wird in einem Stück geladen, über **Mobilfunk** in Teilen von 32 KB (ohne PSRAM 8 KB) über den HTTP-Stack des Modems.
+- Mobilfunk-Updates lassen sich abschalten (*System → Auch über Mobilfunk laden*) und finden **nie im Roaming** statt.
+- Ein Update braucht etwa 1,4 MB Daten.
+- Automatisch nur bei ausgeschalteter Zündung: 2 min nach dem Start, danach alle 6 h.
+- *System → Jetzt prüfen & installieren* startet die Prüfung sofort.
+- Während des Downloads kein Standby.
+- Entwicklungs-Builds (anderer Branch) werden nur auf Anfrage ersetzt.
+
+Geräte mit der alten Update-Quelle (GitHub-Releases) werden beim Start automatisch umgestellt. Das TLS-Zertifikat wird auf dem Gerät nicht geprüft, es ist kein CA-Bundle eingebaut. Die Prüfsumme schützt vor defekten Downloads, aber nicht vor einem Angreifer im Netz, der Manifest und Image gemeinsam austauscht.
 
 Nach einem OTA-Update vergleicht das Web UI die Build-Nummer vor und nach dem Neustart. Ist sie unverändert, erscheint eine Warnung. Die aktive Partition wechselt bei jedem erfolgreichen Update.
 
@@ -116,6 +123,8 @@ Im Standby sind WLAN und Web UI aus, um die Batterie zu schonen. Zum Konfigurier
 
 | Attribut | Bedeutung |
 |---|---|
+| `speed` | Geschwindigkeit: aus OBD (PID 0D), falls verfügbar, sonst GPS; abschaltbar unter *Fahrzeug* |
+| `gpsSpeed` | GPS-Geschwindigkeit in km/h zum Vergleich, wenn `speed` aus OBD kommt |
 | `ignition`, `motion` | Zündung, Bewegung (Traccar nutzt sie für Fahrten und Motorstunden) |
 | `power` | Bordspannung in V |
 | `rssi`, `sat`, `hdop` | Signal, Satelliten, Genauigkeit |

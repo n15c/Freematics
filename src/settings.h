@@ -42,7 +42,8 @@ struct Settings {
   uint16_t intervalIdle;    // s between points while ignition off but still awake
   uint16_t heartbeatMin;    // min between heartbeats while parked (0 = none)
   uint8_t headingChange;    // degrees: send extra point on course change (0 = off)
-  bool autoUpdate;          // install new firmware from updateUrl automatically (WiFi only)
+  bool autoUpdate;          // install new firmware from updateUrl automatically
+  bool otaCellular;         // ... also over cellular (never while roaming)
   char updateUrl[160];      // base URL of the release files
 
   // WiFi
@@ -64,10 +65,12 @@ struct Settings {
 
   // GNSS
   bool gnssKeepOn;          // keep GNSS powered in standby (hot start, ~25 mA)
+  uint16_t gnssKeepMin;     // ... for this many minutes after parking
   bool gnssUseModem;        // use the modem's GNSS if no standalone receiver is found
 
   // vehicle
   bool obdEnabled;
+  bool speedFromObd;        // report the speed from OBD (PID 0D) instead of GNSS when available
   uint8_t obdProtocol;      // 0 = auto, else ELM protocol number
   uint8_t pidCount;
   ObdPidCfg pids[MAX_OBD_PIDS];

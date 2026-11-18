@@ -26,6 +26,8 @@ public:
   float readVoltage();
   // co-processor low power mode / wake up
   void sleep();
+  // stop OBD/CAN activity but keep the co-processor awake (its GNSS keeps running)
+  void idle();
   void wake();
   // append "&key=value" pairs of fresh values (max age in ms)
   void appendAttrs(char* buf, size_t size, uint32_t maxAge);
@@ -35,6 +37,8 @@ public:
   void monitorJson(JsonArray arr);
   // last values (for live view); NAN if unknown
   float pidValue(int i) { return m_pidVal[i]; }
+  // vehicle speed from OBD PID 0D if read within maxAge ms
+  bool obdSpeed(float& kmh, uint32_t maxAge);
   float canValue(int i) { return m_canVal[i]; }
 private:
   bool initLink(bool allowAuto);

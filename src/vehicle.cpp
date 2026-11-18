@@ -62,6 +62,31 @@ void Vehicle::sleep()
   liveUnlock();
 }
 
+bool Vehicle::obdSpeed(float& kmh, uint32_t maxAge)
+{
+  if (!obdConnected()) return false;
+  uint32_t now = millis();
+  for (int i = 0; i < cfg.pidCount; i++) {
+    if (cfg.pids[i].pid == 0x0D && m_pidTs[i] && now - m_pidTs[i] <= maxAge) {
+      kmh = m_pidVal[i];
+      return true;
+    }
+  }
+  return false;
+}
+
+void Vehicle::idle()
+{
+  if (!m_obd.link) return;
+  m_ready = false;
+  m_obdMode = false;
+  char buf[32];
+  cmd("ATPC\r", buf, sizeof(buf)); // close the protocol: no more bus traffic
+  liveLock();
+  live.obdConnected = false;
+  liveUnlock();
+}
+
 void Vehicle::wake()
 {
   if (!m_obd.link) return;

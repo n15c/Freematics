@@ -76,6 +76,7 @@ static void handleStatus()
   doc["buildTime"] = fwBuildTime();
   const esp_partition_t* part = esp_ota_get_running_partition();
   doc["partition"] = part ? part->label : "?";
+  doc["branch"] = fwBranch();
   otaStatusJson(doc["ota"].to<JsonObject>());
   doc["id"] = deviceId();
   doc["uptime"] = (now - l.bootMs) / 1000;
@@ -271,18 +272,37 @@ static void handleUpdateUpload()
   if (cfg.webPass[0] && !server.authenticate("admin", cfg.webPass)) return;
   HTTPUpload& up = server.upload();
   if (up.status == UPLOAD_FILE_START) {
-    Log.printf("[OTA] %s\n", up.filename.c_str());
+    const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
+    Log.printf("[OTA] upload %s -> %s\n", up.filename.c_str(), next ? next->label : "?");
     s_otaOk = false;
     s_otaErr[0] = 0;
     s_otaActivity = millis() | 1;
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) otaError();
+    if (up.filename.endsWith(".zip")) {
+      strlcpy(s_otaErr, "ZIP-Datei: bitte die .bin-Datei daraus entpacken", sizeof(s_otaErr));
+    } else if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      otaError();
+    }
   } else if (up.status == UPLOAD_FILE_WRITE) {
     s_otaActivity = millis() | 1;
+    if (s_otaErr[0]) return;   // already failed, ignore the rest
+    if (up.totalSize == 0 && up.currentSize && up.buf[0] != 0xE9) {
+      strlcpy(s_otaErr, "keine ESP32-Firmware (.bin aus dem ZIP entpacken?)", sizeof(s_otaErr));
+      Update.abort();
+      Log.printf("[OTA] %s\n", s_otaErr);
+      return;
+    }
     if (Update.write(up.buf, up.currentSize) != up.currentSize) otaError();
   } else if (up.status == UPLOAD_FILE_END) {
+    if (s_otaErr[0]) {
+      s_otaActivity = 0;
+      return;
+    }
     s_otaOk = Update.end(true);
     if (!s_otaOk) otaError();
-    else Log.printf("[OTA] done, %u bytes\n", up.totalSize);
+    else {
+      const esp_partition_t* boot = esp_ota_get_boot_partition();
+      Log.printf("[OTA] done, %u bytes, next boot from %s\n", up.totalSize, boot ? boot->label : "?");
+    }
     s_otaActivity = 0;  // on success the restart keeps webBusy() true
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     Update.abort();

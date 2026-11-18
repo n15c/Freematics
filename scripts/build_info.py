@@ -22,6 +22,8 @@ if git("status", "--porcelain", "--untracked-files=no"):
 # commit time orders builds across branches and squash merges (used by the auto update)
 epoch = git("log", "-1", "--format=%ct") or "0"
 pioenv = env.subst("$PIOENV")
+# branch: in GitHub Actions from GITHUB_REF_NAME (pull requests: head branch)
+branch = os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF_NAME") or git("rev-parse", "--abbrev-ref", "HEAD") or "unknown"
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 content = (
@@ -31,7 +33,8 @@ content = (
     "#define FW_COMMIT \"%s\"\n"
     "#define FW_BUILD_TIME \"%s\"\n"
     "#define FW_COMMIT_EPOCH %s\n"
-    "#define FW_ENV \"%s\"\n" % (build, commit, stamp, epoch, pioenv)
+    "#define FW_ENV \"%s\"\n"
+    "#define FW_BRANCH \"%s\"\n" % (build, commit, stamp, epoch, pioenv, branch)
 )
 
 gen_dir = os.path.join(env.subst("$BUILD_DIR"), "generated")

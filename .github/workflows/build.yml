@@ -2,6 +2,7 @@ name: build
 
 on:
   push:
+    branches-ignore: [firmware]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -77,6 +78,7 @@ jobs:
             cat "out/firmware-$ENV.json"
           done
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
           echo "name=Firmware $VERSION build $BUILD ($COMMIT)" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
@@ -87,3 +89,22 @@ jobs:
           files: |
             out/firmware-*.bin
             out/firmware-*.json
+      # Same files on the branch "firmware", served directly (no redirect, byte
+      # ranges supported) by raw.githubusercontent.com: devices download from
+      # there, also over cellular.
+      - name: Publish to firmware branch
+        run: |
+          RAW="https://raw.githubusercontent.com/${{ github.repository }}/firmware"
+          mkdir pub
+          cp out/firmware-*.bin pub/
+          for j in out/firmware-*.json; do
+            ENV=$(basename "$j" .json | sed 's/^firmware-//')
+            sed "s#\"url\":\"[^\"]*\"#\"url\":\"$RAW/firmware-$ENV.bin\"#" "$j" > "pub/$(basename "$j")"
+            cat "pub/$(basename "$j")"
+          done
+          cd pub
+          git init -q -b firmware
+          git add .
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+            commit -q -m "Firmware build ${{ steps.info.outputs.build }} (${{ github.sha }})"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" firmware

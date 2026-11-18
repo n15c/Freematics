@@ -23,6 +23,7 @@ void settingsDefaults(Settings& s)
   s.heartbeatMin = 30;
   s.headingChange = 30;
   s.autoUpdate = true;
+  s.otaCellular = true;
   strlcpy(s.updateUrl, OTA_DEFAULT_URL, sizeof(s.updateUrl));
 
   s.apMode = AP_ALWAYS;
@@ -33,9 +34,11 @@ void settingsDefaults(Settings& s)
   s.modemStandby = MODEM_STANDBY_SLEEP;
 
   s.gnssKeepOn = true;
+  s.gnssKeepMin = 120;
   s.gnssUseModem = true;
 
   s.obdEnabled = true;
+  s.speedFromObd = true;
   s.obdProtocol = 0;
   // attribute names follow Traccar's standard position keys where one exists
   setPid(s.pids[s.pidCount++], 0x0D, 0, "obdSpeed");
@@ -77,6 +80,7 @@ void settingsToJson(const Settings& s, JsonObject o, bool hide)
   o["heartbeatMin"] = s.heartbeatMin;
   o["headingChange"] = s.headingChange;
   o["autoUpdate"] = s.autoUpdate;
+  o["otaCellular"] = s.otaCellular;
   o["updateUrl"] = s.updateUrl;
 
   o["wifiSsid"] = s.wifiSsid;
@@ -95,9 +99,11 @@ void settingsToJson(const Settings& s, JsonObject o, bool hide)
   o["modemStandby"] = s.modemStandby;
 
   o["gnssKeepOn"] = s.gnssKeepOn;
+  o["gnssKeepMin"] = s.gnssKeepMin;
   o["gnssUseModem"] = s.gnssUseModem;
 
   o["obdEnabled"] = s.obdEnabled;
+  o["speedFromObd"] = s.speedFromObd;
   o["obdProtocol"] = s.obdProtocol;
   JsonArray pids = o["pids"].to<JsonArray>();
   for (int i = 0; i < s.pidCount; i++) {
@@ -163,6 +169,7 @@ void settingsFromJson(Settings& s, JsonObjectConst o)
   getNum(o, "heartbeatMin", s.heartbeatMin);
   getNum(o, "headingChange", s.headingChange);
   getNum(o, "autoUpdate", s.autoUpdate);
+  getNum(o, "otaCellular", s.otaCellular);
   getStr(o, "updateUrl", s.updateUrl);
 
   getStr(o, "wifiSsid", s.wifiSsid);
@@ -181,9 +188,11 @@ void settingsFromJson(Settings& s, JsonObjectConst o)
   getNum(o, "modemStandby", s.modemStandby);
 
   getNum(o, "gnssKeepOn", s.gnssKeepOn);
+  getNum(o, "gnssKeepMin", s.gnssKeepMin);
   getNum(o, "gnssUseModem", s.gnssUseModem);
 
   getNum(o, "obdEnabled", s.obdEnabled);
+  getNum(o, "speedFromObd", s.speedFromObd);
   getNum(o, "obdProtocol", s.obdProtocol);
   JsonArrayConst pids = o["pids"];
   if (!pids.isNull()) {
@@ -254,6 +263,9 @@ bool settingsLoad()
   JsonDocument doc;
   if (deserializeJson(doc, json)) return false;
   settingsFromJson(cfg, doc.as<JsonObjectConst>());
+  // the update source moved from GitHub releases (redirects, not usable over
+  // cellular) to the firmware branch on raw.githubusercontent.com
+  if (!strcmp(cfg.updateUrl, OTA_OLD_DEFAULT_URL)) strlcpy(cfg.updateUrl, OTA_DEFAULT_URL, sizeof(cfg.updateUrl));
   return true;
 }
 
