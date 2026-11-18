@@ -7,6 +7,7 @@ static const char* eventName(uint8_t ev)
   case EV_IGNITION_OFF: return "ignitionOff";
   case EV_HEARTBEAT: return "heartbeat";
   case EV_BOOT: return "boot";
+  case EV_WAKE: return "wake";
   default: return nullptr;
   }
 }

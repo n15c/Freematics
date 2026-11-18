@@ -108,7 +108,7 @@ static float memsMotion()
 // ---------------------------------------------------------------------------
 // records
 // ---------------------------------------------------------------------------
-static void pushRecord(uint8_t event)
+static void pushRecord(uint8_t event, const char* extra = nullptr)
 {
   if (!cfg.serverUrl[0]) return;
   static Record r;
@@ -129,6 +129,7 @@ static void pushRecord(uint8_t event)
   r.motion = (lastMotion && millis() - lastMotion < 10000) || r.speed > 5;
   r.power = voltage;
   r.event = event;
+  if (extra) strlcpy(r.attrs, extra, sizeof(r.attrs));
   liveLock();
   r.rssi = (int8_t)constrain(live.rssi, -127, 0);
   char vin[18];
@@ -273,8 +274,10 @@ static void standby()
   state = PS_STANDBY;
   publishLive();
   uplinkSetStandby(true);
+  // a receiver behind the co-processor is switched off by its low power mode
+  // anyway; switch it off cleanly before the co-processor goes to sleep
+  if (gnss.standalone() && (!cfg.gnssKeepOn || gnss.viaCoprocessor())) gnss.end();
   vehicle.sleep();
-  if (!cfg.gnssKeepOn && gnss.standalone()) gnss.end();
   memsCalibrate();
 
   uint32_t standbyStart = millis();
@@ -282,7 +285,7 @@ static void standby()
   uint32_t lastVolt = 0;
   uint32_t lowSince = 0;
   bool saver = false;
-  uint32_t baselineSince = millis();
+  uint8_t voltHits = 0;
   float baseline = voltage > 5 ? voltage : 0;
   bool wake = false;
   const char* reason = "";
@@ -299,11 +302,18 @@ static void standby()
     }
     uint32_t now = millis();
 
-    // 1) motion
+    // 1) motion: two consecutive samples (400 ms) above the threshold, a
+    // single spike (door, passing truck, sensor noise) does not wake up
+    static uint8_t motionHits = 0;
     if (mems && memsMotion() >= cfg.motionG) {
-      wake = true;
-      reason = "motion";
-      break;
+      if (++motionHits >= 2) {
+        motionHits = 0;
+        wake = true;
+        reason = "motion";
+        break;
+      }
+    } else {
+      motionHits = 0;
     }
 
     // 2) voltage: engine running or a clear rise above the parked level
@@ -312,10 +322,22 @@ static void standby()
       lastVolt = now;
       checkVoltage();
       if (voltage > 5) {
-        if (!baseline || voltage < baseline) baseline = voltage;
-        if (now - baselineSince > 1800000UL) { baseline = voltage; baselineSince = now; }
-        if (voltage >= cfg.runVoltage) { wake = true; reason = "voltage"; break; }
-        if (cfg.wakeDelta > 0 && voltage - baseline >= cfg.wakeDelta) { wake = true; reason = "voltage rise"; break; }
+        // baseline follows the parked voltage slowly (a minimum would lock onto
+        // a single low outlier and every normal reading would look like a rise)
+        if (!baseline) baseline = voltage;
+        bool high = voltage >= cfg.runVoltage;
+        bool rise = cfg.wakeDelta > 0 && voltage - baseline >= cfg.wakeDelta;
+        if (high || rise) {
+          // must hold for 3 readings in a row
+          if (++voltHits >= 3) {
+            wake = true;
+            reason = high ? "voltage" : "voltage rise";
+            break;
+          }
+        } else {
+          voltHits = 0;
+          baseline += (voltage - baseline) * 0.05f;
+        }
         // battery protection
         if (!saver && cfg.lowVoltage > 0 && voltage < cfg.lowVoltage) {
           if (!lowSince) lowSince = now;
@@ -356,13 +378,20 @@ static void standby()
   uplinkSetBatterySaver(false);
   uplinkSetStandby(false);
   vehicle.wake();
-  if (gnssHw && !gnss.standalone()) gnss.begin(&sys);
+  if (gnssHw && (!gnss.standalone() || !gnss.hasFix(30000))) {
+    // off, or on but without data (e.g. behind the sleeping co-processor)
+    if (gnss.standalone()) gnss.end();
+    gnss.begin(&sys);
+  }
   gnss.resetFilter();
   state = PS_IDLE;
   idleSince = millis();
   lastMotion = millis();
   // report immediately: the server sees the car is awake within seconds
-  pushRecord(EV_NONE);
+  char extra[48];
+  snprintf(extra, sizeof(extra), "&wakeReason=%s&wakeVoltage=%.2f", reason, voltage);
+  for (char* c = extra; *c; c++) if (*c == ' ') *c = '_';
+  pushRecord(EV_WAKE, extra);
 }
 
 // ---------------------------------------------------------------------------

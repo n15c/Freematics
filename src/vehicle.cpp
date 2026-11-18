@@ -41,7 +41,10 @@ float Vehicle::readVoltage()
   if (!m_sys) return 0;
   if (m_sys->devType > 12) {
     // newer units measure the OBD supply directly on the ESP32
-    return (float)(analogRead(A0) * 45) / 4095;
+    // single ADC samples are noisy (several 0.1 V): average them
+    uint32_t sum = 0;
+    for (int i = 0; i < 16; i++) sum += analogRead(A0);
+    return (float)(sum / 16 * 45) / 4095;
   }
   return m_obd.getVoltage();
 }

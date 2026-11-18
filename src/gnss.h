@@ -20,6 +20,8 @@ public:
   bool begin(FreematicsESP32* sys);
   void end();
   bool standalone() { return m_standalone; }
+  // receiver attached to the co-processor: cannot stay on in standby
+  bool viaCoprocessor() { return m_standalone && m_sys && m_sys->gpsUsesLink(); }
   // poll the receiver; true if a new plausible fix was accepted
   bool update();
   // called from the uplink task with data from the modem's GNSS
