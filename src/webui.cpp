@@ -13,7 +13,6 @@
 #include "webui_page.h"
 #include "version.h"
 #include "ota.h"
-#include "gnss_probe.h"
 #include <esp_ota_ops.h>
 
 static WebServer server(WEB_PORT);
@@ -225,13 +224,6 @@ static void handleLog()
   server.send(200, "text/plain; charset=utf-8", buf);
 }
 
-static void handleGnssProbe()
-{
-  if (!auth()) return;
-  gnssProbeRequest();
-  server.send(200, "application/json", "{\"ok\":true}");
-}
-
 static void handleOtaCheck()
 {
   if (!auth()) return;
@@ -341,7 +333,6 @@ void webBegin()
   server.on("/api/queue/clear", HTTP_POST, handleQueueClear);
   server.on("/api/log", HTTP_GET, handleLog);
   server.on("/api/ota/check", HTTP_POST, handleOtaCheck);
-  server.on("/api/gnss/probe", HTTP_POST, handleGnssProbe);
   server.on("/api/can/monitor", HTTP_POST, handleCanMonitor);
   server.on("/api/can/frames", HTTP_GET, handleCanFrames);
   server.on("/api/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
