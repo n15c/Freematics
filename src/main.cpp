@@ -522,6 +522,12 @@ void loop()
   }
   if (due) pushRecord(EV_NONE);
 
+  static uint32_t lastGnssLog = 0;
+  if ((ignition || moving) && now - lastGnssLog >= 60000) {
+    lastGnssLog = now;
+    gnss.logStatus();
+  }
+
   static uint32_t lastPub = 0;
   if (now - lastPub >= 500) {
     lastPub = now;
