@@ -34,20 +34,11 @@ bool Gnss::begin(FreematicsESP32* sys)
   m_lastData = millis();
   m_lastAliveCheck = 0;
   m_deadChecks = 0;
+  m_timeSeen = false;
+  m_lastAliveTime = 0;
   m_startMs = millis();
   m_firstFixLogged = false;
   return m_standalone;
-}
-
-// co-processor receiver: ATGPS keeps answering with the last parsed values
-// even when the receiver has stopped, so check that raw NMEA sentences flow
-bool Gnss::linkAlive()
-{
-  char buf[256];
-  int n = m_sys->gpsGetNMEA(buf, sizeof(buf) - 1);
-  if (n <= 0) return false;
-  buf[n] = 0;
-  return strstr(buf, "GGA") || strstr(buf, "RMC") || strstr(buf, "GSA");
 }
 
 void Gnss::restart(const char* why)
@@ -168,11 +159,22 @@ bool Gnss::update()
     // running: restarting it throws away the satellites found so far.
     // Counted in checks, not time: the main loop can be blocked for seconds
     // (OBD protocol search, VIN), which must not look like a dead receiver.
+    //
+    // UART receiver: the sentence counter must advance.
+    // Co-processor receiver: ATGRR cannot be used for this (ATGPS consumes the
+    // same buffer, so ATGRR is nearly always empty). Instead the receiver's
+    // UTC time in the ATGPS answer must advance - but only once it has been
+    // seen advancing: a receiver without any satellite yet (cold start,
+    // garage) has no time and must not be restarted.
     if (now - m_lastAliveCheck >= 3000) {
       m_lastAliveCheck = now;
       bool alive;
       if (link) {
-        alive = linkAlive();
+        uint32_t t = gd ? gd->time : 0;
+        alive = t && t != m_lastAliveTime;
+        if (alive && m_lastAliveTime) m_timeSeen = true;
+        if (t) m_lastAliveTime = t;
+        if (!m_timeSeen) alive = true;
       } else {
         alive = gd && gd->sentences != m_lastSentences;
         if (gd) m_lastSentences = gd->sentences;
@@ -184,9 +186,17 @@ bool Gnss::update()
         m_deadChecks++;
       }
     }
-    if (m_deadChecks >= GNSS_DEAD_CHECKS) {
+    if (link) {
+      // Diagnostics only: in a long tunnel the time may also stand still, and
+      // a restart there would throw away the satellites. Log it so a receiver
+      // switched off by the co-processor (e.g. after an OBD init) shows up.
+      if (m_deadChecks == GNSS_DEAD_CHECKS_LINK) {
+        Log.printf("[GNSS] co-processor receiver: time unchanged for %us (receiver stopped?)\n",
+                   GNSS_DEAD_CHECKS_LINK * 3);
+      }
+    } else if (m_deadChecks >= GNSS_DEAD_CHECKS) {
       m_deadChecks = 0;
-      restart(link ? "co-processor receiver stopped delivering NMEA" : "receiver silent");
+      restart("receiver silent");
       return false;
     }
     if (good && gd && gd->time != m_lastGpsTime) {
