@@ -36,7 +36,8 @@
 #define VOLTAGE_CHECK_MS 1000
 #define OBD_RETRY_MS 4000          // retry OBD init while ignition is on
 #define CAN_SNIFF_WINDOW_MS 120    // listening window per sniff cycle
-#define GNSS_DEAD_CHECKS 5          // restart a GNSS receiver after 5 checks (3 s apart) without any data
+#define GNSS_DEAD_CHECKS 5          // UART receiver: restart after 5 checks (3 s apart) without any sentence
+#define GNSS_DEAD_CHECKS_LINK 10    // co-processor receiver: log when its time stood still for 10 checks (30 s)
 #define MODEM_MIN_POWERCYCLE_MS 180000UL // never power cycle the modem more often (operator bans)
 #define HTTP_TIMEOUT_MS 15000
 #define WIFI_CONNECT_TIMEOUT_MS 8000

@@ -47,10 +47,11 @@ private:
   uint32_t m_lastStatusLog = 0;
   uint16_t m_restarts = 0;
   uint8_t m_deadChecks = 0;
+  bool m_timeSeen = false;      // co-processor receiver: UTC time seen advancing
+  uint32_t m_lastAliveTime = 0;
   bool m_hw = false;            // a standalone receiver was found
   bool m_ended = false;         // switched off on purpose (standby)
   uint32_t m_lastBeginTry = 0;
-  bool linkAlive();
   void restart(const char* why);
   uint32_t m_lastGpsTime = 0xffffffff;
   uint16_t m_lastSentences = 0;
