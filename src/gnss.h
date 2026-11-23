@@ -30,14 +30,28 @@ public:
   const Fix& last() { return m_fix; }
   bool hasFix(uint32_t maxAgeMs) { return m_fix.ms && millis() - m_fix.ms < maxAgeMs; }
   uint32_t rejected() { return m_rejected; }
+  uint16_t restarts() { return m_restarts; }
+  // log a status line (called periodically while driving)
+  void logStatus();
   // drop the plausibility anchor (e.g. after standby: the car may have been moved)
-  void resetFilter() { m_candCount = 0; m_anchorValid = false; }
+  void resetFilter() { m_candCount = 0; m_anchorValid = false; m_startMs = millis(); m_firstFixLogged = false; }
 private:
   bool accept(const GPS_DATA& gd, uint32_t now);
   bool plausible(double lat, double lon, uint32_t ms, double refLat, double refLon, uint32_t refMs);
   FreematicsESP32* m_sys = nullptr;
   bool m_standalone = false;
-  uint32_t m_lastData = 0;
+  uint32_t m_lastData = 0;      // last sign of life of the receiver (NMEA flowing)
+  uint32_t m_lastAliveCheck = 0;
+  uint32_t m_startMs = 0;       // receiver (re)started, for time-to-first-fix
+  bool m_firstFixLogged = false;
+  uint32_t m_lastStatusLog = 0;
+  uint16_t m_restarts = 0;
+  uint8_t m_deadChecks = 0;
+  bool m_hw = false;            // a standalone receiver was found
+  bool m_ended = false;         // switched off on purpose (standby)
+  uint32_t m_lastBeginTry = 0;
+  bool linkAlive();
+  void restart(const char* why);
   uint32_t m_lastGpsTime = 0xffffffff;
   uint16_t m_lastSentences = 0;
   Fix m_fix = {};

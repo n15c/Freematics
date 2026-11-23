@@ -19,6 +19,8 @@ bool Gnss::begin(FreematicsESP32* sys)
   m_sys = sys;
   if (!m_mutex) m_mutex = xSemaphoreCreateMutex();
   m_standalone = false;
+  m_ended = false;
+  m_lastBeginTry = millis();
   if (sys->gpsBeginExt()) {
     Log.println("[GNSS] external receiver");
     m_standalone = true;
@@ -28,14 +30,55 @@ bool Gnss::begin(FreematicsESP32* sys)
   } else {
     Log.println("[GNSS] no standalone receiver");
   }
+  if (m_standalone) m_hw = true;
   m_lastData = millis();
+  m_lastAliveCheck = 0;
+  m_deadChecks = 0;
+  m_startMs = millis();
+  m_firstFixLogged = false;
   return m_standalone;
+}
+
+// co-processor receiver: ATGPS keeps answering with the last parsed values
+// even when the receiver has stopped, so check that raw NMEA sentences flow
+bool Gnss::linkAlive()
+{
+  char buf[256];
+  int n = m_sys->gpsGetNMEA(buf, sizeof(buf) - 1);
+  if (n <= 0) return false;
+  buf[n] = 0;
+  return strstr(buf, "GGA") || strstr(buf, "RMC") || strstr(buf, "GSA");
+}
+
+void Gnss::restart(const char* why)
+{
+  m_restarts++;
+  Log.printf("[GNSS] %s, restarting receiver (#%u)\n", why, m_restarts);
+  m_sys->gpsEnd(true);
+  delay(50);
+  begin(m_sys);
+}
+
+void Gnss::logStatus()
+{
+  if (!m_standalone && !m_fix.ms) return;
+  uint32_t now = millis();
+  if (m_fix.ms && now - m_fix.ms < 5000) {
+    Log.printf("[GNSS] fix: %u sats, HDOP %.1f, %.0f km/h, rejected %u, restarts %u\n",
+               m_fix.sat, m_fix.hdop, m_fix.speed, (unsigned)m_rejected, m_restarts);
+  } else {
+    Log.printf("[GNSS] NO FIX for %lus (receiver %s, last data %lus ago), restarts %u\n",
+               (unsigned long)(now - (m_fix.ms > m_startMs ? m_fix.ms : m_startMs)) / 1000,
+               m_standalone ? (viaCoprocessor() ? "co-processor" : "UART") : "modem",
+               (unsigned long)(now - m_lastData) / 1000, m_restarts);
+  }
 }
 
 void Gnss::end()
 {
   if (m_standalone && m_sys) m_sys->gpsEnd(true);
   m_standalone = false;
+  m_ended = true;
 }
 
 void Gnss::feedModem(const GPS_DATA& gd)
@@ -111,25 +154,50 @@ bool Gnss::accept(const GPS_DATA& gd, uint32_t now)
 bool Gnss::update()
 {
   uint32_t now = millis();
+  // a receiver that failed to restart: keep trying (not when switched off on purpose)
+  if (!m_standalone && m_hw && !m_ended && now - m_lastBeginTry > 30000) {
+    Log.println("[GNSS] retrying receiver start");
+    begin(m_sys);
+  }
   if (m_standalone) {
     GPS_DATA* gd = nullptr;
     bool good = m_sys->gpsGetData(&gd);
-    if (gd && gd->sentences != m_lastSentences) {
-      // receiver is alive (even without a fix, e.g. in a garage)
-      m_lastSentences = gd->sentences;
-      m_lastData = now;
-    }
-    if (good && gd) {
-      m_lastData = now;
-      if (gd->time != m_lastGpsTime) {
-        m_lastGpsTime = gd->time;
-        return accept(*gd, now);
+    bool link = viaCoprocessor();
+    // Restart only a receiver that delivers nothing at all (switched off, e.g.
+    // by a co-processor reset). A receiver that is searching must keep
+    // running: restarting it throws away the satellites found so far.
+    // Counted in checks, not time: the main loop can be blocked for seconds
+    // (OBD protocol search, VIN), which must not look like a dead receiver.
+    if (now - m_lastAliveCheck >= 3000) {
+      m_lastAliveCheck = now;
+      bool alive;
+      if (link) {
+        alive = linkAlive();
+      } else {
+        alive = gd && gd->sentences != m_lastSentences;
+        if (gd) m_lastSentences = gd->sentences;
       }
-    } else if (now - m_lastData > GNSS_REINIT_MS) {
-      Log.println("[GNSS] no data, restarting receiver");
-      m_sys->gpsEnd(true);
-      delay(50);
-      begin(m_sys);
+      if (alive) {
+        m_lastData = now;
+        m_deadChecks = 0;
+      } else {
+        m_deadChecks++;
+      }
+    }
+    if (m_deadChecks >= GNSS_DEAD_CHECKS) {
+      m_deadChecks = 0;
+      restart(link ? "co-processor receiver stopped delivering NMEA" : "receiver silent");
+      return false;
+    }
+    if (good && gd && gd->time != m_lastGpsTime) {
+      m_lastGpsTime = gd->time;
+      bool ok = accept(*gd, now);
+      if (ok && !m_firstFixLogged) {
+        m_firstFixLogged = true;
+        Log.printf("[GNSS] first fix after %lus (%u sats, HDOP %.1f)\n",
+                   (unsigned long)(now - m_startMs) / 1000, m_fix.sat, m_fix.hdop);
+      }
+      return ok;
     }
     return false;
   }
